@@ -34,7 +34,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define CMD_BUF_LEN 32
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -50,7 +50,9 @@ TIM_HandleTypeDef htim2;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+volatile uint8_t  uart2_rx_byte;           // byte recibido por IT
+volatile uint8_t  cmd_idx = 0;             // índice de escritura en el buffer
+volatile char     cmd_buf[CMD_BUF_LEN];    // buffer de comando (sin ':')
 
 
 /* USER CODE END PV */
@@ -62,6 +64,14 @@ static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
+
+
+void Command_Interpreter(const char *buf);
+
+
+
+void set_pwm_period(uint32_t period, TIM_HandleTypeDef *htimx);
+void set_pwm_dutycycle(float dutycycle, TIM_HandleTypeDef *htimx, uint32_t channel);
 
 /* USER CODE END PFP */
 
@@ -103,6 +113,7 @@ int main(void)
   MX_ADC1_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+  HAL_UART_Receive_IT(&huart2, (uint8_t*)&uart2_rx_byte, 1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
 
   /* USER CODE END 2 */
@@ -337,6 +348,37 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART2) {
+        uint8_t b = uart2_rx_byte;
+
+        if (b == ':') {
+            cmd_idx = 0; // nuevo comando (no guardamos ':')
+        } else if (b == '\r' || b == '\n') {
+            if (cmd_idx > 0) {
+                // Cerrar string y llamar al intérprete
+                uint8_t i = cmd_idx;
+                if (i >= CMD_BUF_LEN) i = CMD_BUF_LEN - 1;
+                ((char*)cmd_buf)[i] = '\0';
+                Command_Interpreter((const char*)cmd_buf);
+                cmd_idx = 0;
+            } // si está vacío, ignoramos
+        } else {
+            // Acumular carácter si hay espacio
+            if (cmd_idx < CMD_BUF_LEN - 1) {
+                ((char*)cmd_buf)[cmd_idx++] = (char)b;
+            } // si se llena, se truncan caracteres hasta Enter o ':'
+        }
+
+        // Rearmar la recepción de 1 byte
+        HAL_UART_Receive_IT(&huart2, (uint8_t*)&uart2_rx_byte, 1);
+    }
+}
+
 void set_pwm_period(uint32_t period, TIM_HandleTypeDef *htimx){
 	TIM_TypeDef *TIMx = htimx->Instance;
 	if (period == 0) period = 1;
@@ -360,6 +402,60 @@ void set_pwm_dutycycle(float dutycycle, TIM_HandleTypeDef *htimx){
 	TIMx->EGR = TIM_EGR_UG;
 }
 
+
+
+// Intérprete de comandos (switch-case): buf = "L123" (sin ':')
+void Command_Interpreter(const char *buf)
+{
+    if (buf == NULL || buf[0] == '\0') return;
+
+    // 1) Extraer comando (primera letra)
+    char cmd = buf[0];
+    if (cmd >= 'a' && cmd <= 'z') cmd = (char)(cmd - 'a' + 'A');
+
+    // 2) Parsear parámetro numérico opcional (dígitos después de la letra)
+    const char *p = buf + 1;
+    while (*p == ' ') p++;               // saltar espacios
+    uint32_t val = 0;
+    while (*p >= '0' && *p <= '9') {
+        val = val * 10u + (uint32_t)(*p - '0');
+        p++;
+    }
+
+    // 3) Acciones
+    switch (cmd) {
+        case 'P': // Período ARR en ticks: :Pxxx
+            set_pwm_period(val, &htim2);
+            break;
+
+        case 'D': // Duty en %: :Dxxx  (0..100)
+            if (val > 100) val = 100;
+            set_pwm_dutycycle((float)val, &htim2, TIM_CHANNEL_1);
+            break;
+
+        case 'F': { // Frecuencia en Hz: :Fxxx  (calcula ARR manteniendo PSC)
+            if (val == 0) break;
+            TIM_TypeDef *TIMx = htim2.Instance;
+            uint32_t pclk1 = HAL_RCC_GetPCLK1Freq();
+            uint32_t timclk = pclk1;
+            if ((RCC->CFGR & RCC_CFGR_PPRE1) != RCC_CFGR_PPRE1_DIV1) timclk = pclk1 * 2u;
+
+            uint32_t f_cnt = timclk / (TIMx->PSC + 1u);
+            uint32_t arr = (f_cnt / val);
+            if (arr > 0) arr -= 1u;
+            if (arr == 0) arr = 1u;
+
+            set_pwm_period(arr, &htim2);
+            break;
+        }
+
+        // Agregá más comandos acá:
+
+        default:
+            // Comando desconocido: ignorar o loguear si querés
+            break;
+    }
+}
 
 /* USER CODE END 4 */
 
