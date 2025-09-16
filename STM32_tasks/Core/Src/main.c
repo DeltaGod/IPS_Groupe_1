@@ -23,7 +23,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <ctype.h>
+#include <stdarg.h>
+#include <stdlib.h>  // strtoul
 
 /* USER CODE END Includes */
 
@@ -34,7 +36,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define CMD_BUF_LEN 32
+#define CMD_BUF_LEN 64
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -50,9 +52,12 @@ TIM_HandleTypeDef htim2;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-volatile uint8_t  uart2_rx_byte;           // byte recibido por IT
-volatile uint8_t  cmd_idx = 0;             // índice de escritura en el buffer
-volatile char     cmd_buf[CMD_BUF_LEN];    // buffer de comando (sin ':')
+volatile uint8_t  uart2_rx_byte;           // byte recived in Interrupt
+volatile uint8_t  adc_mode_analog = 0;   // 0=consola, 1=analógico
+volatile int16_t  last_sent_pct   = -1;  // last %
+
+volatile uint8_t  cmd_idx = 0;             // index
+volatile char     cmd_buf[CMD_BUF_LEN];    // buffer
 
 
 /* USER CODE END PV */
@@ -67,12 +72,13 @@ static void MX_TIM2_Init(void);
 
 
 void Command_Interpreter(const char *buf);
+void uart2_printf(const char *fmt, ...);
 
 
 
 void set_pwm_period(uint32_t period, TIM_HandleTypeDef *htimx);
-void set_pwm_dutycycle(float dutycycle, TIM_HandleTypeDef *htimx, uint32_t channel);
-
+void set_pwm_dutycycle(float dutycycle, TIM_HandleTypeDef *htimx);
+uint16_t ADC1_Read12(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -113,8 +119,10 @@ int main(void)
   MX_ADC1_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-  HAL_UART_Receive_IT(&huart2, (uint8_t*)&uart2_rx_byte, 1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+  HAL_UART_Receive_IT(&huart2, (uint8_t*)&uart2_rx_byte, 1);
+  uart2_printf("UART OK. Cmds: :P<num>, :D<0-100>, :A0/:A1 (console/analog), ENTER para salir de analog.\r\n");
+
 
   /* USER CODE END 2 */
 
@@ -123,6 +131,18 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
+
+	  if (adc_mode_analog) {
+	      uint16_t raw = ADC1_Read12();                   // 0..4095
+	      uint8_t  pct = (uint8_t)((raw * 100UL + 2047) / 4095UL);  // round up
+	      set_pwm_dutycycle((float)pct, &htim2);
+
+	      // Enviar por UART si cambió (para no saturar)
+	      if (pct != last_sent_pct) {
+	          last_sent_pct = pct;
+	          uart2_printf("ADC duty=%u%% (raw=%u)\r\n", (unsigned)pct, (unsigned)raw);
+	      }
+	  }
 
     /* USER CODE BEGIN 3 */
   }
@@ -359,24 +379,56 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         if (b == ':') {
             cmd_idx = 0; // nuevo comando (no guardamos ':')
         } else if (b == '\r' || b == '\n') {
-            if (cmd_idx > 0) {
-                // Cerrar string y llamar al intérprete
-                uint8_t i = cmd_idx;
-                if (i >= CMD_BUF_LEN) i = CMD_BUF_LEN - 1;
-                ((char*)cmd_buf)[i] = '\0';
-                Command_Interpreter((const char*)cmd_buf);
+            // Si estoy en modo analógico, ENTER sale a modo consola
+            if (adc_mode_analog) {
+                adc_mode_analog = 0;
+                last_sent_pct = -1;
                 cmd_idx = 0;
-            } // si está vacío, ignoramos
+                uart2_printf("Analog mode OFF -> console duty\r\n");
+            } else {
+                if (cmd_idx > 0) {
+                    // Cerrar string y llamar al intérprete
+                    uint8_t i = cmd_idx;
+                    if (i >= CMD_BUF_LEN) i = CMD_BUF_LEN - 1;
+                    cmd_buf[i] = '\0';
+                    Command_Interpreter((const char*)cmd_buf);
+                    cmd_idx = 0;
+                }
+            }
         } else {
             // Acumular carácter si hay espacio
             if (cmd_idx < CMD_BUF_LEN - 1) {
-                ((char*)cmd_buf)[cmd_idx++] = (char)b;
-            } // si se llena, se truncan caracteres hasta Enter o ':'
+                cmd_buf[cmd_idx++] = (char)b;
+            }
         }
 
         // Rearmar la recepción de 1 byte
         HAL_UART_Receive_IT(&huart2, (uint8_t*)&uart2_rx_byte, 1);
     }
+}
+
+uint16_t ADC1_Read12(void)
+{
+    HAL_ADC_Start(&hadc1);
+    if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) { // timeout 10 ms
+        uint32_t v = HAL_ADC_GetValue(&hadc1);            // 0..4095 (12 bits)
+        HAL_ADC_Stop(&hadc1);
+        return (uint16_t)v;
+    }
+    HAL_ADC_Stop(&hadc1);
+    return 0;
+}
+
+void uart2_printf(const char *fmt, ...)
+{
+    char buf[96];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (n < 0) return;
+    if ((size_t)n > sizeof(buf)) n = sizeof(buf);
+    HAL_UART_Transmit(&huart2, (uint8_t*)buf, (uint16_t)n, 100);
 }
 
 void set_pwm_period(uint32_t period, TIM_HandleTypeDef *htimx){
@@ -405,54 +457,49 @@ void set_pwm_dutycycle(float dutycycle, TIM_HandleTypeDef *htimx){
 
 
 // Intérprete de comandos (switch-case): buf = "L123" (sin ':')
+
 void Command_Interpreter(const char *buf)
 {
-    if (buf == NULL || buf[0] == '\0') return;
+    if (!buf || !buf[0]) return;
 
-    // 1) Extraer comando (primera letra)
-    char cmd = buf[0];
-    if (cmd >= 'a' && cmd <= 'z') cmd = (char)(cmd - 'a' + 'A');
+    char cmd = (char)toupper((unsigned char)buf[0]);
 
-    // 2) Parsear parámetro numérico opcional (dígitos después de la letra)
     const char *p = buf + 1;
-    while (*p == ' ') p++;               // saltar espacios
-    uint32_t val = 0;
-    while (*p >= '0' && *p <= '9') {
-        val = val * 10u + (uint32_t)(*p - '0');
-        p++;
-    }
+    while (*p == ' ') p++;
+    uint32_t val = strtoul(p, NULL, 10);
 
-    // 3) Acciones
     switch (cmd) {
-        case 'P': // Período ARR en ticks: :Pxxx
+        case 'P': // Period (ARR) en ticks: :P<num>
             set_pwm_period(val, &htim2);
+            uart2_printf("ARR=%lu\r\n", (unsigned long)val);
             break;
 
-        case 'D': // Duty en %: :Dxxx  (0..100)
+        case 'D': // Duty en %: :D<0..100>
             if (val > 100) val = 100;
-            set_pwm_dutycycle((float)val, &htim2, TIM_CHANNEL_1);
+            set_pwm_dutycycle((float)val, &htim2);
+            adc_mode_analog = 0; // opcional: al fijar por consola, quedate en modo consola
+            uart2_printf("Duty=%lu%% (console)\r\n", (unsigned long)val);
             break;
 
-        case 'F': { // Frecuencia en Hz: :Fxxx  (calcula ARR manteniendo PSC)
-            if (val == 0) break;
-            TIM_TypeDef *TIMx = htim2.Instance;
-            uint32_t pclk1 = HAL_RCC_GetPCLK1Freq();
-            uint32_t timclk = pclk1;
-            if ((RCC->CFGR & RCC_CFGR_PPRE1) != RCC_CFGR_PPRE1_DIV1) timclk = pclk1 * 2u;
-
-            uint32_t f_cnt = timclk / (TIMx->PSC + 1u);
-            uint32_t arr = (f_cnt / val);
-            if (arr > 0) arr -= 1u;
-            if (arr == 0) arr = 1u;
-
-            set_pwm_period(arr, &htim2);
+        case 'A': // Modo: :A1 = analog ON, :A0 = analog OFF
+            if (val == 1) {
+                adc_mode_analog = 1;
+                last_sent_pct = -1;
+                uart2_printf("Analog mode ON (ENTER para salir)\r\n");
+            } else {
+                adc_mode_analog = 0;
+                last_sent_pct = -1;
+                uart2_printf("Analog mode OFF -> console duty\r\n");
+            }
             break;
-        }
 
-        // Agregá más comandos acá:
+        case 'S': // Start PWM ch1
+            HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+            uart2_printf("PWM CH1 START\r\n");
+            break;
 
         default:
-            // Comando desconocido: ignorar o loguear si querés
+            uart2_printf("ERR cmd '%c'\r\n", cmd);
             break;
     }
 }
