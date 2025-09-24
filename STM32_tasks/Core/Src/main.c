@@ -26,6 +26,8 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdlib.h>  // strtoul
+#include <stdio.h>
+/* USER CODE END Includes */
 
 /* USER CODE END Includes */
 
@@ -66,18 +68,16 @@ volatile char     cmd_buf[CMD_BUF_LEN];    // buffer
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
-static void MX_ADC1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
-
-
+void TIM2_SetPeriod_ms(uint32_t ms);
+uint32_t TIM2_GetCounterTickHz(void);
 void Command_Interpreter(const char *buf);
 void uart2_printf(const char *fmt, ...);
 
 
 
-void set_pwm_period(uint32_t period, TIM_HandleTypeDef *htimx);
-void set_pwm_dutycycle(float dutycycle, TIM_HandleTypeDef *htimx);
 uint16_t ADC1_Read12(void);
 /* USER CODE END PFP */
 
@@ -116,12 +116,14 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
-  MX_ADC1_Init();
   MX_TIM2_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
   HAL_UART_Receive_IT(&huart2, (uint8_t*)&uart2_rx_byte, 1);
-  uart2_printf("UART OK. Cmds: :P<num>, :D<0-100>, :A0/:A1 (console/analog), ENTER para salir de analog.\r\n");
+  uart2_printf("UART OK. Cmds: :P<num_ms>, :A0/:A1 (console/analog), ENTER sale de analog.\r\n");
+  HAL_TIM_Base_Start_IT(&htim2);
+
+/* USER CODE END 2 */
 
 
   /* USER CODE END 2 */
@@ -130,19 +132,13 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
-
 	  if (adc_mode_analog) {
-	      uint16_t raw = ADC1_Read12();                   // 0..4095
-	      uint8_t  pct = (uint8_t)((raw * 100UL + 2047) / 4095UL);  // round up
-	      set_pwm_dutycycle((float)pct, &htim2);
-
-	      // Enviar por UART si cambió (para no saturar)
-	      if (pct != last_sent_pct) {
-	          last_sent_pct = pct;
-	          uart2_printf("ADC duty=%u%% (raw=%u)\r\n", (unsigned)pct, (unsigned)raw);
+	          uint16_t raw = ADC1_Read12();                        // 0..4095
+	          float volts = (3.3f * (float)raw) / 4095.0f;         // Vref=3.3 V
+	          uart2_printf("ADC raw=%u  V=%.3f\r\n", raw, volts);
+	          HAL_Delay(50);
 	      }
-	  }
+    /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
@@ -268,7 +264,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 49999;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 1000;
+  htim2.Init.Period = 10000;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -280,7 +276,7 @@ static void MX_TIM2_Init(void)
   {
     Error_Handler();
   }
-  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  if (HAL_TIM_OC_Init(&htim2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -290,18 +286,17 @@ static void MX_TIM2_Init(void)
   {
     Error_Handler();
   }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 100;
+  sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
+  sConfigOC.Pulse = 10000;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  if (HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
   {
     Error_Handler();
   }
   /* USER CODE BEGIN TIM2_Init 2 */
 
   /* USER CODE END TIM2_Init 2 */
-  HAL_TIM_MspPostInit(&htim2);
 
 }
 
@@ -356,11 +351,21 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LD2_Pin */
+  GPIO_InitStruct.Pin = LD2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -368,6 +373,13 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == TIM2) {
+        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin); // Toggle LED L2 (PA5)
+    }
+}
 
 
 
@@ -431,30 +443,28 @@ void uart2_printf(const char *fmt, ...)
     HAL_UART_Transmit(&huart2, (uint8_t*)buf, (uint16_t)n, 100);
 }
 
-void set_pwm_period(uint32_t period, TIM_HandleTypeDef *htimx){
-	TIM_TypeDef *TIMx = htimx->Instance;
-	if (period == 0) period = 1;
 
-	TIMx->ARR = period;
-	TIMx->CNT = 0;
-	TIMx->EGR = TIM_EGR_UG;
-
-    if (TIMx->CCR1 > period) TIMx->CCR1 = period;
-    if (TIMx->CCR2 > period) TIMx->CCR2 = period;
-    if (TIMx->CCR3 > period) TIMx->CCR3 = period;
-    if (TIMx->CCR4 > period) TIMx->CCR4 = period;
+uint32_t TIM2_GetCounterTickHz(void)
+{
+    uint32_t pclk1 = HAL_RCC_GetPCLK1Freq();
+    /* Si el prescaler de APB1 != 1, los timers corren al doble */
+    if ((RCC->CFGR & RCC_CFGR_PPRE1) != RCC_CFGR_PPRE1_DIV1) {
+        pclk1 *= 2U;
+    }
+    return pclk1 / (htim2.Init.Prescaler + 1U);
 }
 
-void set_pwm_dutycycle(float dutycycle, TIM_HandleTypeDef *htimx){
-	TIM_TypeDef *TIMx = htimx->Instance;
-    if (dutycycle < 0.0f) dutycycle = 0.0f;
-    if (dutycycle > 100.0f) dutycycle = 100.0f;
-    uint32_t new_CCR = (uint32_t)(((float)(TIMx->ARR + 1)) * (dutycycle / 100.0f));
-    TIMx->CCR1 = new_CCR;
-	TIMx->EGR = TIM_EGR_UG;
+void TIM2_SetPeriod_ms(uint32_t ms)
+{
+    if (ms == 0) ms = 1;
+    uint32_t tick_hz = TIM2_GetCounterTickHz();     // p.ej. 2 kHz con tu PSC=49999
+    uint32_t arr = (tick_hz * ms) / 1000U;
+    if (arr == 0) arr = 1;
+    __HAL_TIM_DISABLE(&htim2);
+    __HAL_TIM_SET_AUTORELOAD(&htim2, arr - 1U);     // ARR = N-1
+    __HAL_TIM_SET_COUNTER(&htim2, 0);
+    __HAL_TIM_ENABLE(&htim2);
 }
-
-
 
 // Intérprete de comandos (switch-case): buf = "L123" (sin ':')
 
@@ -469,17 +479,11 @@ void Command_Interpreter(const char *buf)
     uint32_t val = strtoul(p, NULL, 10);
 
     switch (cmd) {
-        case 'P': // Period (ARR) en ticks: :P<num>
-            set_pwm_period(val, &htim2);
-            uart2_printf("ARR=%lu\r\n", (unsigned long)val);
-            break;
+    	case 'P':  // :P<num_ms>
+    		TIM2_SetPeriod_ms(val);
+        	uart2_printf("TIM2 period set to %lu ms\r\n", (unsigned long)val);
+        	break;
 
-        case 'D': // Duty en %: :D<0..100>
-            if (val > 100) val = 100;
-            set_pwm_dutycycle((float)val, &htim2);
-            adc_mode_analog = 0; // opcional: al fijar por consola, quedate en modo consola
-            uart2_printf("Duty=%lu%% (console)\r\n", (unsigned long)val);
-            break;
 
         case 'A': // Modo: :A1 = analog ON, :A0 = analog OFF
             if (val == 1) {
@@ -493,10 +497,6 @@ void Command_Interpreter(const char *buf)
             }
             break;
 
-        case 'S': // Start PWM ch1
-            HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
-            uart2_printf("PWM CH1 START\r\n");
-            break;
 
         default:
             uart2_printf("ERR cmd '%c'\r\n", cmd);

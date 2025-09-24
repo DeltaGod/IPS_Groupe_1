@@ -61,7 +61,7 @@ main-build: STM32_tasks.elf secondary-outputs
 
 # Tool invocations
 STM32_tasks.elf STM32_tasks.map: $(OBJS) $(USER_OBJS) /home/facundo/STM32CubeIDE/git/IPS_Groupe_1/STM32_tasks/STM32F411RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "STM32_tasks.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/home/facundo/STM32CubeIDE/git/IPS_Groupe_1/STM32_tasks/STM32F411RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="STM32_tasks.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+	arm-none-eabi-gcc -o "STM32_tasks.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/home/facundo/STM32CubeIDE/git/IPS_Groupe_1/STM32_tasks/STM32F411RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="STM32_tasks.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
