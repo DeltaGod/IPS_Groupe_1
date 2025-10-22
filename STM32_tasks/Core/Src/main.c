@@ -27,7 +27,7 @@
 #include <stdarg.h>
 #include <stdlib.h>  // strtoul
 #include <stdio.h>
-/* USER CODE END Includes */
+#include <math.h>
 
 /* USER CODE END Includes */
 
@@ -39,6 +39,34 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define CMD_BUF_LEN 64
+
+#define ADC_VREF_V              3.3f
+#define ADC_MAX_COUNTS          4095.0f
+
+#define ISENSE_ADC_CHANNEL      ADC_CHANNEL_0   /* A0 = PA0 on Nucleo F411RE */
+#define TEMP_ADC_CHANNEL        ADC_CHANNEL_1   /* A1 = PA1 on Nucleo F411RE */
+
+#define ISENSE_RSHUNT_OHMS      0.05f           // 50 mΩ
+#define ISENSE_AD623_RG_OHMS    4300.0f         // 4.3k
+#define ISENSE_AD623_GAIN       (1.0f + 49400.0f / ISENSE_AD623_RG_OHMS)
+#define ISENSE_AD623_VREF_V     0.0f            // REF = GND
+
+
+#define NTC_RREF_OHMS           47000.0f        // 47k  ohm
+#define TEMP_AD623_RG_OHMS      100000.0f       // 100K ohm
+#define TEMP_AD623_GAIN         (1.0f + 49400.0f / TEMP_AD623_RG_OHMS)
+
+#define TEMP_REF_RTOP_OHMS      27000.0f        // R4
+#define TEMP_REF_RBOT_OHMS      10000.0f        // R3
+#define TEMP_AD623_VREF_V       (ADC_VREF_V * (TEMP_REF_RBOT_OHMS / (TEMP_REF_RTOP_OHMS + TEMP_REF_RBOT_OHMS)))
+
+/* Thermistor parameters (ADJUST to your NTC part) */
+#define NTC_R0_OHMS             47000.0f       // e.g., 47k at 25°C
+#define NTC_BETA_K              3950.0f         // e.g., B=3950
+#define NTC_T0_K                298.15f         // 25°C in Kelvin
+
+#define ADC_SAMPLES_AVG         8
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -76,9 +104,11 @@ uint32_t TIM2_GetCounterTickHz(void);
 void Command_Interpreter(const char *buf);
 void uart2_printf(const char *fmt, ...);
 
+static uint16_t ADC1_Read12_Channel(uint32_t channel);
+static float    ADC1_Read_Average_V(uint32_t channel);
+float           Mesure_current_A(void);
+float           Mesure_Temperature_C(void);
 
-
-uint16_t ADC1_Read12(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -123,9 +153,6 @@ int main(void)
   uart2_printf("UART OK. Cmds: :P<num_ms>, :A0/:A1 (console/analog), ENTER sale de analog.\r\n");
   HAL_TIM_Base_Start_IT(&htim2);
 
-/* USER CODE END 2 */
-
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -133,10 +160,12 @@ int main(void)
   while (1)
   {
 	  if (adc_mode_analog) {
-	          uint16_t raw = ADC1_Read12();                        // 0..4095
-	          float volts = (3.3f * (float)raw) / 4095.0f;         // Vref=3.3 V
-	          uart2_printf("ADC raw=%u  V=%.3f\r\n", raw, volts);
-	          HAL_Delay(50);
+          /* Measure current (mA) and temperature (°C) */
+          float i_mA = Mesure_current_A();
+          float t_C  = Mesure_Temperature_C();
+
+          /* Send one line */
+          uart2_printf("%.1f\t%.2f\r\n", i_mA, t_C);
 	      }
     /* USER CODE END WHILE */
 
@@ -229,7 +258,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_10;
+  sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = 1;
   sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
@@ -419,17 +448,146 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     }
 }
 
-uint16_t ADC1_Read12(void)
+static uint16_t ADC1_Read12_Channel(uint32_t channel)
 {
-    HAL_ADC_Start(&hadc1);
-    if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) { // timeout 10 ms
-        uint32_t v = HAL_ADC_GetValue(&hadc1);            // 0..4095 (12 bits)
-        HAL_ADC_Stop(&hadc1);
-        return (uint16_t)v;
+    ADC_ChannelConfTypeDef sConfig = {0};
+
+    sConfig.Channel      = channel;
+
+/* F4 HAL uses numeric rank (1..16). Newer families define ADC_REGULAR_RANK_1. */
+#if defined(ADC_REGULAR_RANK_1)
+    sConfig.Rank         = ADC_REGULAR_RANK_1;
+#else
+    sConfig.Rank         = 1;  // STM32F4
+#endif
+
+    /* Use a reasonable sampling time to accommodate source impedance */
+    sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
+
+#if defined(ADC_SINGLE_ENDED)
+    sConfig.SingleDiff   = ADC_SINGLE_ENDED;   // not present on F4
+#endif
+
+    if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+        Error_Handler();
     }
+
+    HAL_ADC_Start(&hadc1);
+    if (HAL_ADC_PollForConversion(&hadc1, 10) != HAL_OK) {
+        HAL_ADC_Stop(&hadc1);
+        return 0;
+    }
+
+    uint16_t val = (uint16_t)HAL_ADC_GetValue(&hadc1);   // 0..4095
     HAL_ADC_Stop(&hadc1);
-    return 0;
+    return val;
 }
+
+/* Read N samples on a channel and return the average in volts. */
+static float ADC1_Read_Average_V(uint32_t channel)
+{
+    uint32_t acc = 0;
+    for (int i = 0; i < ADC_SAMPLES_AVG; ++i) {
+        acc += ADC1_Read12_Channel(channel);
+    }
+    /* Avoid integer division loss of precision */
+    float counts = (float)acc / (float)ADC_SAMPLES_AVG;
+    return (counts / ADC_MAX_COUNTS) * ADC_VREF_V;
+}
+
+
+/* Measure load current and return it in milliamps (mA).
+ * Topology: AD623 with gain = ISENSE_AD623_GAIN, REF = ISENSE_AD623_VREF_V,
+ *           shunt = ISENSE_RSHUNT_OHMS, ADC channel = ISENSE_ADC_CHANNEL.
+ *
+ * Flow:
+ *   1) Read AD623 output voltage at ADC pin.
+ *   2) Remove AD623 REF offset.
+ *   3) Divide by AD623 gain to recover shunt differential voltage.
+ *   4) I = Vsense / Rshunt  -> convert to mA.
+ */
+float Mesure_current_A(void)
+{
+    /* 1) Read averaged ADC voltage at A0 (AD623 output) */
+    float v_adc = ADC1_Read_Average_V(ISENSE_ADC_CHANNEL);
+
+    /* 2) Remove AD623 REF offset (0 V in your current path) */
+    float v_out_rel = v_adc - ISENSE_AD623_VREF_V;
+
+    /* 3) Recover shunt voltage */
+    float v_sense = v_out_rel / ISENSE_AD623_GAIN;
+
+    /* 4) Convert to current and return in mA */
+    float i_a = v_sense / ISENSE_RSHUNT_OHMS;   /* Amps */
+    return i_a * 1000.0f;                       /* mA */
+}
+
+
+/* Measure temperature using Steinhart–Hart (3rd-order) fitted to EPCOS 47k, R/T #4003.
+ * The AD623 REF and gain are removed first to recover the divider node voltage.
+ * Datasheet anchor points (R/R25 for R/T 4003):
+ *   T1 = 0°C,  R1 = R25 * 3.5243
+ *   T2 = 25°C, R2 = R25
+ *   T3 = 85°C, R3 = R25 * 0.10053
+ * This yields SH: 1/T = A + B*ln(R) + C*ln(R)^3   (T in Kelvin).
+ */
+float Mesure_Temperature_C(void)
+{
+    /* ---------- 1) Read AD623 output (A1) and recover divider node voltage ---------- */
+    float v_adc  = ADC1_Read_Average_V(TEMP_ADC_CHANNEL);               // AD623 output @ ADC
+    float v_node = (v_adc - TEMP_AD623_VREF_V) / TEMP_AD623_GAIN;       // raw divider node
+
+    /* Clamp to (0, Vref) to avoid division-by-zero and log() issues */
+    if (v_node >= (ADC_VREF_V - 1e-6f)) v_node = ADC_VREF_V - 1e-6f;
+    if (v_node <= 1e-6f)                 v_node = 1e-6f;
+
+    /* ---------- 2) Compute thermistor resistance from the divider ---------- */
+    /* Vnode = Vref * (Rntc / (Rref + Rntc))  =>  Rntc = Rref * Vnode / (Vref - Vnode) */
+    float r_ntc = NTC_RREF_OHMS * (v_node / (ADC_VREF_V - v_node));
+
+    /* ---------- 3) Steinhart–Hart using 3 points from the datasheet (computed once) ---------- */
+    /* Anchors (datasheet R/T 4003) */
+    const float R25      = 47000.0f;        // 47k at 25°C
+    const float ratio0C  = 3.5243f;         // R(0°C)/R25
+    const float ratio85C = 0.10053f;        // R(85°C)/R25
+
+    const float R1 = R25 * ratio0C;         // at 0°C
+    const float R2 = R25;                   // at 25°C
+    const float R3 = R25 * ratio85C;        // at 85°C
+
+    const float T1 = 273.15f;               // 0°C  in Kelvin
+    const float T2 = 298.15f;               // 25°C in Kelvin
+    const float T3 = 358.15f;               // 85°C in Kelvin
+
+    /* Precompute SH coefficients once */
+    static int   sh_init = 0;
+    static float sh_A, sh_B, sh_C;
+
+    if (!sh_init) {
+        /* Solve for A, B, C in: 1/T = A + B*L + C*L^3, with L = ln(R) */
+        float L1 = logf(R1), L2 = logf(R2), L3 = logf(R3);
+        float Y1 = 1.0f / T1, Y2 = 1.0f / T2, Y3 = 1.0f / T3;
+
+        /* From AN206-style derivation */
+        float gamma2 = (Y2 - Y1) / (L2 - L1);
+        float gamma3 = (Y3 - Y1) / (L3 - L1);
+        sh_C = (gamma3 - gamma2) / (L3 - L2) / (L1 + L2 + L3);
+        sh_B = gamma2 - sh_C * (L2*L2 + L1*L2 + L1*L1);
+        sh_A = Y1 - sh_B*L1 - sh_C*(L1*L1*L1);
+
+        sh_init = 1;
+    }
+
+    /* ---------- 4) Compute temperature from measured R using SH ---------- */
+    float L  = logf(r_ntc);
+    float Y  = sh_A + sh_B*L + sh_C*(L*L*L);    // 1/T in 1/K
+    if (Y <= 0.0f) Y = 1e-6f;                   // safety
+    float T_K = 1.0f / Y;
+    float T_C = T_K - 273.15f;
+
+    return T_C;  /* °C */
+}
+
 
 void uart2_printf(const char *fmt, ...)
 {
