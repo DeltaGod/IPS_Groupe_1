@@ -12,7 +12,7 @@
   * This software is licensed under terms that can be found in the LICENSE file
   * in the root directory of this software component.
   * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
+  *65535
   ******************************************************************************
   */
 
@@ -56,6 +56,13 @@
 #define TEMP_AD623_RG_OHMS      100000.0f       // 100K ohm
 #define TEMP_AD623_GAIN         (1.0f + 49400.0f / TEMP_AD623_RG_OHMS)
 
+/* Add near your other #defines (only once) */
+#define TEMP_BIAS_RTOP_OHMS   47000.0f   // R1
+#define TEMP_BIAS_RBOT_OHMS   47000.0f   // R2
+#define TEMP_BIAS_VMID        (ADC_VREF_V * (TEMP_BIAS_RBOT_OHMS / (TEMP_BIAS_RTOP_OHMS + TEMP_BIAS_RBOT_OHMS)))
+/* For 47k/47k this is ~1.65 V */
+
+
 #define TEMP_REF_RTOP_OHMS      27000.0f        // R4
 #define TEMP_REF_RBOT_OHMS      10000.0f        // R3
 #define TEMP_AD623_VREF_V       (ADC_VREF_V * (TEMP_REF_RBOT_OHMS / (TEMP_REF_RTOP_OHMS + TEMP_REF_RBOT_OHMS)))
@@ -67,6 +74,8 @@
 
 #define ADC_SAMPLES_AVG         8
 
+#define SUPPLY_VOLTAGE_V   24.0f
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -77,17 +86,24 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
+TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 volatile uint8_t  uart2_rx_byte;           // byte recived in Interrupt
-volatile uint8_t  adc_mode_analog = 0;   // 0=consola, 1=analógico
 volatile int16_t  last_sent_pct   = -1;  // last %
 
 volatile uint8_t  cmd_idx = 0;             // index
 volatile char     cmd_buf[CMD_BUF_LEN];    // buffer
+
+volatile uint8_t pwm_test_mode   = 0;
+
+/* === New runtime state === */
+volatile uint8_t stream_on   = 0;   // 0=OFF, 1=ON
+volatile uint8_t duty_pct    = 0;   // Current duty in % (0..100)
+
 
 
 /* USER CODE END PV */
@@ -98,7 +114,9 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
+void TIM1_CH1_SetDutyPercent(float duty_pct);
 void TIM2_SetPeriod_ms(uint32_t ms);
 uint32_t TIM2_GetCounterTickHz(void);
 void Command_Interpreter(const char *buf);
@@ -106,8 +124,11 @@ void uart2_printf(const char *fmt, ...);
 
 static uint16_t ADC1_Read12_Channel(uint32_t channel);
 static float    ADC1_Read_Average_V(uint32_t channel);
+void TIM1_CH1_SetDutyPercent(float duty_pct);
 float           Mesure_current_A(void);
 float           Mesure_Temperature_C(void);
+
+
 
 /* USER CODE END PFP */
 
@@ -148,32 +169,70 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM2_Init();
   MX_ADC1_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_UART_Receive_IT(&huart2, (uint8_t*)&uart2_rx_byte, 1);
-  uart2_printf("UART OK. Cmds: :P<num_ms>, :A0/:A1 (console/analog), ENTER sale de analog.\r\n");
-  HAL_TIM_Base_Start_IT(&htim2);
+  /* Start 20 kHz PWM on TIM1 CH1 -> PA8 (D7) */
 
+  if (HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1) != HAL_OK) {
+      Error_Handler();
+  }
+  __HAL_TIM_MOE_ENABLE(&htim1);
+  TIM1_CH1_SetDutyPercent(0.0f);
+
+  HAL_UART_Receive_IT(&huart2, (uint8_t*)&uart2_rx_byte, 1);
+  HAL_TIM_Base_Start_IT(&htim2);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if (adc_mode_analog) {
-          /* Measure current (mA) and temperature (°C) */
-          float i_mA = Mesure_current_A();
-          float t_C  = Mesure_Temperature_C();
 
-          /* Send one line */
-          uart2_printf("%.1f\t%.2f\r\n", i_mA, t_C);
-	      }
+      /* ===== Streaming :S =====
+       * Emits: Corriente;Temperatura;DuttyCycle;Potencia\n
+       * Potencia = 24V * (duty%/100) * Corriente
+       */
+      if (stream_on) {
+          float i_A = Mesure_current_A();
+          float t_C = Mesure_Temperature_C();
+          float p_W = SUPPLY_VOLTAGE_V * ((float)duty_pct / 100.0f) * i_A;
+
+          /* Format EXACTLY: Corriente;Temperatura;DuttyCycle;Potencia\n */
+          uart2_printf("%.4f;%.2f;%u;%.2f\r\n",
+                       i_A, t_C, (unsigned)duty_pct, p_W);
+
+          HAL_Delay(100);   // ~10 Hz stream
+          continue;
+      }
+
+      /* ===== Test mode :K (prints only when streaming is OFF) ===== */
+      if (pwm_test_mode) {
+          static uint8_t header_printed_k = 0;
+          if (!header_printed_k) {
+              uart2_printf("\r\nVraw_I [V]\tI [A]\tVraw_T [V]\tT [°C]\tDuty [%]\r\n");
+              header_printed_k = 1;
+          }
+
+          float vraw_a0 = ADC1_Read_Average_V(ISENSE_ADC_CHANNEL);
+          float vraw_a1 = ADC1_Read_Average_V(TEMP_ADC_CHANNEL);
+          float i_A     = Mesure_current_A();
+          float t_C     = Mesure_Temperature_C();
+
+          uart2_printf("%.4f [V]\t%.4f [A]\t%.4f [V]\t%.2f [°C]\t%u [%%]\r\n",
+                       vraw_a0, i_A, vraw_a1, t_C, (unsigned)duty_pct);
+
+          HAL_Delay(100);
+          continue;
+      }
+
+
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
 }
-
 /**
   * @brief System Clock Configuration
   * @retval None
@@ -268,6 +327,71 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief TIM1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM1_Init(void)
+{
+
+  /* USER CODE BEGIN TIM1_Init 0 */
+
+  /* USER CODE END TIM1_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
+
+  /* USER CODE BEGIN TIM1_Init 1 */
+
+  /* USER CODE END TIM1_Init 1 */
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 0;
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 4999;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_PWM_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+  if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
+  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
+  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+  sBreakDeadTimeConfig.DeadTime = 0;
+  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
+  if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM1_Init 2 */
+
+  /* USER CODE END TIM1_Init 2 */
+  HAL_TIM_MspPostInit(&htim1);
 
 }
 
@@ -418,35 +542,55 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         uint8_t b = uart2_rx_byte;
 
         if (b == ':') {
-            cmd_idx = 0; // nuevo comando (no guardamos ':')
+            /* Start of a new command: drop ':' and reset the buffer */
+            cmd_idx = 0;
+
         } else if (b == '\r' || b == '\n') {
-            // Si estoy en modo analógico, ENTER sale a modo consola
-            if (adc_mode_analog) {
-                adc_mode_analog = 0;
-                last_sent_pct = -1;
+            /* ENTER pressed: close special modes or dispatch buffered command */
+
+            if (pwm_test_mode) {
+                /* Exit K-mode on ENTER (return to 0% for safety) */
+                pwm_test_mode = 0;
+                duty_pct = 0;
+                TIM1_CH1_SetDutyPercent(0.0f);
+                htim1.Instance->EGR = TIM_EGR_UG;  /* force immediate update */
                 cmd_idx = 0;
-                uart2_printf("Analog mode OFF -> console duty\r\n");
+                uart2_printf("PWM test END -> duty=0%%\r\n");
+
             } else {
+                /* No special mode: if we have a buffered command, run it */
                 if (cmd_idx > 0) {
-                    // Cerrar string y llamar al intérprete
-                    uint8_t i = cmd_idx;
-                    if (i >= CMD_BUF_LEN) i = CMD_BUF_LEN - 1;
-                    cmd_buf[i] = '\0';
+                    if (cmd_idx >= CMD_BUF_LEN) cmd_idx = CMD_BUF_LEN - 1;
+                    cmd_buf[cmd_idx] = '\0';
                     Command_Interpreter((const char*)cmd_buf);
                     cmd_idx = 0;
                 }
             }
+
+        } else if ((b == '+' || b == '-') && pwm_test_mode) {
+            /* Jog duty in K-mode by ±10% steps, clamped to 0..100 */
+            if (b == '+') {
+                duty_pct = (duty_pct >= 90) ? 100 : (uint8_t)(duty_pct + 10);
+            } else {
+                duty_pct = (duty_pct <= 10) ?   0 : (uint8_t)(duty_pct - 10);
+            }
+            TIM1_CH1_SetDutyPercent((float)duty_pct);
+            htim1.Instance->EGR = TIM_EGR_UG;  /* make the new CCR1 effective now */
         } else {
-            // Acumular carácter si hay espacio
+            /* Accumulate printable characters for a command payload */
             if (cmd_idx < CMD_BUF_LEN - 1) {
-                cmd_buf[cmd_idx++] = (char)b;
+                if (b >= 32 && b <= 126) {
+                    cmd_buf[cmd_idx++] = (char)b;
+                }
             }
         }
 
-        // Rearmar la recepción de 1 byte
+        /* Re-arm reception of the next byte */
         HAL_UART_Receive_IT(&huart2, (uint8_t*)&uart2_rx_byte, 1);
     }
 }
+
+
 
 static uint16_t ADC1_Read12_Channel(uint32_t channel)
 {
@@ -496,7 +640,8 @@ static float ADC1_Read_Average_V(uint32_t channel)
 }
 
 
-/* Measure load current and return it in milliamps (mA).
+
+/* Measure load current and return it in amps (A).
  * Topology: AD623 with gain = ISENSE_AD623_GAIN, REF = ISENSE_AD623_VREF_V,
  *           shunt = ISENSE_RSHUNT_OHMS, ADC channel = ISENSE_ADC_CHANNEL.
  *
@@ -504,7 +649,7 @@ static float ADC1_Read_Average_V(uint32_t channel)
  *   1) Read AD623 output voltage at ADC pin.
  *   2) Remove AD623 REF offset.
  *   3) Divide by AD623 gain to recover shunt differential voltage.
- *   4) I = Vsense / Rshunt  -> convert to mA.
+ *   4) I = Vsense / Rshunt  -> convert to A.
  */
 float Mesure_current_A(void)
 {
@@ -517,9 +662,9 @@ float Mesure_current_A(void)
     /* 3) Recover shunt voltage */
     float v_sense = v_out_rel / ISENSE_AD623_GAIN;
 
-    /* 4) Convert to current and return in mA */
+    /* 4) Convert to current and return in A */
     float i_a = v_sense / ISENSE_RSHUNT_OHMS;   /* Amps */
-    return i_a * 1000.0f;                       /* mA */
+    return i_a;
 }
 
 
@@ -533,42 +678,50 @@ float Mesure_current_A(void)
  */
 float Mesure_Temperature_C(void)
 {
-    /* ---------- 1) Read AD623 output (A1) and recover divider node voltage ---------- */
-    float v_adc  = ADC1_Read_Average_V(TEMP_ADC_CHANNEL);               // AD623 output @ ADC
-    float v_node = (v_adc - TEMP_AD623_VREF_V) / TEMP_AD623_GAIN;       // raw divider node
+    /* 1) Read AD623 output (what the ADC sees) */
+    float v_adc  = ADC1_Read_Average_V(TEMP_ADC_CHANNEL);
 
-    /* Clamp to (0, Vref) to avoid division-by-zero and log() issues */
-    if (v_node >= (ADC_VREF_V - 1e-6f)) v_node = ADC_VREF_V - 1e-6f;
-    if (v_node <= 1e-6f)                 v_node = 1e-6f;
+    /* 2) INA de-embedding: differential at inputs */
+    float v_diff = (v_adc - TEMP_AD623_VREF_V) / TEMP_AD623_GAIN;
 
-    /* ---------- 2) Compute thermistor resistance from the divider ---------- */
-    /* Vnode = Vref * (Rntc / (Rref + Rntc))  =>  Rntc = Rref * Vnode / (Vref - Vnode) */
+    /* 3) Rebuild the actual divider node: Vnode = VMID + v_diff
+          (AD623 measures node - VMID; if inputs were swapped, the sign flips) */
+    float v_node = TEMP_BIAS_VMID - v_diff;
+
+    /* If the result looks out-of-range, try opposite polarity (inverted wiring). */
+    if (v_node <= 0.0f || v_node >= ADC_VREF_V) {
+        v_node = TEMP_BIAS_VMID - v_diff;
+    }
+
+    /* Keep within (0, Vref) to avoid singularities */
+    const float EPS = 1e-6f;
+    if (v_node >= (ADC_VREF_V - EPS)) v_node = ADC_VREF_V - EPS;
+    if (v_node <= EPS)                 v_node = EPS;
+
+    /* 4) Thermistor resistance from divider:
+          Vnode = Vref * (Rntc / (Rref + Rntc))  =>  Rntc = Rref * Vnode / (Vref - Vnode) */
     float r_ntc = NTC_RREF_OHMS * (v_node / (ADC_VREF_V - v_node));
 
-    /* ---------- 3) Steinhart–Hart using 3 points from the datasheet (computed once) ---------- */
-    /* Anchors (datasheet R/T 4003) */
-    const float R25      = 47000.0f;        // 47k at 25°C
-    const float ratio0C  = 3.5243f;         // R(0°C)/R25
-    const float ratio85C = 0.10053f;        // R(85°C)/R25
+    /* 5) Steinhart–Hart with EPCOS 47k, R/T #4003 anchors (computed once) */
+    const float R25      = 47000.0f;     // 47k @ 25°C
+    const float ratio0C  = 3.5243f;      // R(0°C)/R25
+    const float ratio85C = 0.10053f;     // R(85°C)/R25
 
-    const float R1 = R25 * ratio0C;         // at 0°C
-    const float R2 = R25;                   // at 25°C
-    const float R3 = R25 * ratio85C;        // at 85°C
+    const float R1 = R25 * ratio0C;      // at 0°C
+    const float R2 = R25;                // at 25°C
+    const float R3 = R25 * ratio85C;     // at 85°C
 
-    const float T1 = 273.15f;               // 0°C  in Kelvin
-    const float T2 = 298.15f;               // 25°C in Kelvin
-    const float T3 = 358.15f;               // 85°C in Kelvin
+    const float T1 = 273.15f;            // 0°C  in K
+    const float T2 = 298.15f;            // 25°C in K
+    const float T3 = 358.15f;            // 85°C in K
 
-    /* Precompute SH coefficients once */
     static int   sh_init = 0;
     static float sh_A, sh_B, sh_C;
 
     if (!sh_init) {
-        /* Solve for A, B, C in: 1/T = A + B*L + C*L^3, with L = ln(R) */
         float L1 = logf(R1), L2 = logf(R2), L3 = logf(R3);
         float Y1 = 1.0f / T1, Y2 = 1.0f / T2, Y3 = 1.0f / T3;
 
-        /* From AN206-style derivation */
         float gamma2 = (Y2 - Y1) / (L2 - L1);
         float gamma3 = (Y3 - Y1) / (L3 - L1);
         sh_C = (gamma3 - gamma2) / (L3 - L2) / (L1 + L2 + L3);
@@ -578,14 +731,30 @@ float Mesure_Temperature_C(void)
         sh_init = 1;
     }
 
-    /* ---------- 4) Compute temperature from measured R using SH ---------- */
     float L  = logf(r_ntc);
-    float Y  = sh_A + sh_B*L + sh_C*(L*L*L);    // 1/T in 1/K
-    if (Y <= 0.0f) Y = 1e-6f;                   // safety
+    float Y  = sh_A + sh_B*L + sh_C*(L*L*L);   /* 1/T [1/K] */
+    if (Y <= 0.0f) Y = EPS;
     float T_K = 1.0f / Y;
     float T_C = T_K - 273.15f;
 
-    return T_C;  /* °C */
+    return T_C;
+}
+
+/* Set TIM1 CH1 duty in percent (0..100)  (HEATING RESISTENCE DUTTY-CYCLE)*/
+// Apply duty in % to TIM1 CH1 and force the update immediately
+void TIM1_CH1_SetDutyPercent(float duty_pct)
+{
+    if (duty_pct < 0.0f)   duty_pct = 0.0f;
+    if (duty_pct > 100.0f) duty_pct = 100.0f;
+
+    uint32_t arr = __HAL_TIM_GET_AUTORELOAD(&htim1);              // e.g. 4999
+    uint32_t ccr = (uint32_t)((duty_pct * (float)(arr + 1U)) * 0.01f);
+    if (ccr > arr) ccr = arr;                                     // 100% -> arr
+
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, ccr);            // write CCR1
+
+    // Force an update event so the new CCR is taken immediately (no shadow delay)
+    htim1.Instance->EGR = TIM_EGR_UG;                             // generate UG
 }
 
 
@@ -642,19 +811,43 @@ void Command_Interpreter(const char *buf)
         	uart2_printf("TIM2 period set to %lu ms\r\n", (unsigned long)val);
         	break;
 
+    	case 'K':   // :K -> start K-mode (manual +/- duty jog) + table (if not streaming)
+    	{
+    	    pwm_test_mode = 1;
+    	    duty_pct = 0;
+    	    TIM1_CH1_SetDutyPercent(0.0f);
+    	    uart2_printf("PWM test START. Use '+' / '-' (±10%%). ENTER to stop.\r\n");
+    	}
+    	break;
 
-        case 'A': // Modo: :A1 = analog ON, :A0 = analog OFF
-            if (val == 1) {
-                adc_mode_analog = 1;
-                last_sent_pct = -1;
-                uart2_printf("Analog mode ON (ENTER para salir)\r\n");
-            } else {
-                adc_mode_analog = 0;
-                last_sent_pct = -1;
-                uart2_printf("Analog mode OFF -> console duty\r\n");
-            }
-            break;
+    	case 'D':  // :Dxxx -> set duty directly (0..100) and stay there
+    	{
+    	    if (val > 100U) val = 100U;
+    	    duty_pct = (uint8_t)val;
+    	    TIM1_CH1_SetDutyPercent((float)duty_pct);
+    	}
+    	break;
 
+    	case 'S':  // :S  -> start streaming   |  :S0 -> stop streaming
+    	{
+    	    // Look at the first non-space char after 'S'
+    	    while (*p == ' ') p++;
+    	    if (*p == '0') {
+    	        stream_on = 0;
+    	    } else {
+    	        stream_on = 1;
+    	    }
+    	}
+    	break;
+
+    	case 'A':  // :A -> SAFE STOP (duty=0, streaming OFF, K-mode OFF)
+    	{
+    	    stream_on     = 0;
+    	    pwm_test_mode = 0;
+    	    duty_pct      = 0;
+    	    TIM1_CH1_SetDutyPercent(0.0f);
+    	}
+    	break;
 
         default:
             uart2_printf("ERR cmd '%c'\r\n", cmd);
