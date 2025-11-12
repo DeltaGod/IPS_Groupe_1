@@ -11,10 +11,8 @@ class MainController:
         self.lux_dist=True
     
     def bind_callbacks(self):
-        self.view.mtr_off_button.clicked.connect(self.mtr_off_btn_clicked)
-        self.view.mtr_auto_button.clicked.connect(self.mtr_auto_btn_clicked)
-        self.view.mtr_on_button.clicked.connect(self.mtr_on_btn_clicked)
-        self.view.lux_dist_button.clicked.connect(self.switch_light_dist_btn_clicked)
+        if DEBUG :
+            print(f"bind_callbacks()")
 
     def mtr_off_btn_clicked(self):
         self.model.set_motor_mode(0)

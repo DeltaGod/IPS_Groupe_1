@@ -1,4 +1,4 @@
-# read_uart.py
+# uart_manager.py
 '''
 :Dxxx = change duty cycle
 :S = start data stream
@@ -92,9 +92,10 @@ class UARTmanager():
 
     def send_command(self, command: str):
         command = str(command)
-        if DEBUG:
-            print(f"Sending: {command.strip()}")
-        self.ser.write(command.encode())
+        if self.ser is not None:
+            if DEBUG:
+                print(f"Sending: {command.strip()}")
+            self.ser.write(command.encode())
 
     def stop_everything(self):
         if DEBUG:
@@ -127,7 +128,7 @@ class UARTmanager():
 
 if __name__ == "__main__" :
 
-    uart = UARTmanager(port="COM8")
+    uart = UARTmanager()
 
     uart.connect()
     uart.start_streaming()

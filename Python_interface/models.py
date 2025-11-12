@@ -76,4 +76,7 @@ class MainModel(Subject, Observer):
         self.set_port(port)
         self.set_baudrate(baudrate)
         self.uart.connect()
+    
+    def cleanup(self):
+        pass
 

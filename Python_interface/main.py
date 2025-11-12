@@ -1,21 +1,20 @@
 # main.py
 # coding: utf-8
 DEBUG=True
-# Before running, make sure to:
-# ip_set_can
-# ifconfig
-# in a separate terminal
 
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow
+from PyQt5.QtWidgets import QApplication, QMainWindow, QMenuBar
+
 
 from views import MainView
-from  controllers import MainController
+from controllers import MainController
 from models import MainModel
 
 class MainWindow(QMainWindow):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._createMenuBar()
+
         self.setWindowTitle("Thermistance Control")
 
         self.view = MainView() # QWidget
@@ -40,6 +39,12 @@ class MainWindow(QMainWindow):
         self.controller.cleanup()
         self.model.cleanup() # stop timer
         self.view.cleanup()
+
+
+    def _createMenuBar(self):
+        menuBar = QMenuBar(self)
+        menuBar.addMenu("menu")
+        self.setMenuBar(menuBar)
 
     
 
