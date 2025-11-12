@@ -1,6 +1,6 @@
 # timer.py
 # coding: utf-8
-DEBUG = False
+DEBUG = True
 
 from observer import Subject, Observer
 import threading
@@ -28,7 +28,7 @@ class Timer(Subject):
         """Start the timer. If already running, this is a no-op."""
         if self._thread is not None and self._thread.is_alive():
             if DEBUG:
-                print(f"{type(self).__name__} - already running")
+                print(f"{type(self).__name__}.start() - already running")
             return
 
         # Clear any previous stop request
@@ -36,7 +36,7 @@ class Timer(Subject):
 
         def _run_loop():
             if DEBUG:
-                print(f"{type(self).__name__} - thread started, period=", self.period)
+                print(f"{type(self).__name__}._run_loop() - thread started, period=", self.period)
             # Loop until stop event is set. Wait returns True if event set.
             while not self._stop_event.is_set():
                 waited = self._stop_event.wait(self.period)
@@ -45,14 +45,14 @@ class Timer(Subject):
                     break
                 try:
                     if DEBUG:
-                        print(f"{type(self).__name__} - notifying observers")
+                        print(f"{type(self).__name__}._run_loop() - notifying observers")
                     self.notify()
                 except Exception as e:
                     # Don't let observer exceptions kill the loop; log and continue
                     if DEBUG:
-                        print(f"{type(self).__name__} - exception while notifying observers:", e)
+                        print(f"{type(self).__name__}._run_loop() - exception while notifying observers:", e)
             if DEBUG:
-                print(f"{type(self).__name__} - thread exiting")
+                print(f"{type(self).__name__}._run_loop() - thread exiting")
 
         self._thread = threading.Thread(target=_run_loop, daemon=True)
         self._thread.start()
@@ -60,7 +60,7 @@ class Timer(Subject):
         """Stop the timer. If not running, this is a no-op."""
         if self._thread is None:
             if DEBUG:
-                print(f"{type(self).__name__} - not running")
+                print(f"{type(self).__name__}._run_loop() - not running")
             return
 
         # Signal the thread to stop and wait for it to exit
@@ -69,7 +69,7 @@ class Timer(Subject):
             # Wait a short while for clean exit
             self._thread.join(timeout=self.period + 1.0)
         if DEBUG:
-            print(f"{type(self).__name__} - stopped")
+            print(f"{type(self).__name__}.stop() - stopped")
         # Clear thread reference
         self._thread = None
 

@@ -10,7 +10,7 @@ class MainController:
     
     def bind_callbacks(self):
         if DEBUG :
-            print(f"{type(self).__name__}")
+            print(f"{type(self).__name__}.bind_callbacks()")
         self.view.on_button.clicked.connect(self.on_btn_clicked)
         self.view.off_button.clicked.connect(self.off_btn_clicked)
 

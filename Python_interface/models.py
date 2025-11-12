@@ -1,6 +1,6 @@
 # models.py
 # coding: utf-8
-DEBUG=False
+DEBUG = True
 
 from uart_manager import UARTmanager
 from observer import Subject, Observer
@@ -40,12 +40,12 @@ class MainModel(Subject, Observer):
         if is_connected:
             if (self._port is None) or (self._baudrate is None):
                 if DEBUG:
-                    print(f"{type(self).__name__} - Missing port or baudrate!")
+                    print(f"{type(self).__name__}.set_is_connected() - Missing port or baudrate!")
                 self._is_connected = False
                 raise ConnectionAbortedError
             elif self._is_connected: 
                 if DEBUG:
-                    print(f"{type(self).__name__} - Already connected")
+                    print(f"{type(self).__name__}.set_is_connected() - Already connected")
             else :
                 try :
                     self._uart.connect()
@@ -62,13 +62,13 @@ class MainModel(Subject, Observer):
             # send setpoint and start data_stream
             if not self._is_connected:
                 if DEBUG:
-                    print(f"{type(self).__name__} - Not Connected!")
+                    print(f"{type(self).__name__}.set_is_running() - Not Connected!")
                 self._is_running = False
                 self._timer.stop()
                 pass
             elif self._is_running:
                 if DEBUG:
-                    print(f"{type(self).__name__} - Already running")
+                    print(f"{type(self).__name__}.set_is_running() - Already running")
                 self._timer.start()
             else:
                 self._uart.start_streaming()
@@ -125,10 +125,11 @@ class MainModel(Subject, Observer):
     def fetch_measures(self):
         data = self._uart.read_data()
         if DEBUG:
-            print(f"{type(self).__name__} - {data}")
+            print(f"{type(self).__name__}.fetch_measures()")
         if data :
             if DEBUG:
-                print(f"{type(self).__name__} - {data}")
+                print(f"{type(self).__name__}.fetch_measures() - {data}")
+                print(f"{type(self).__name__}.fetch_measures() - {data['current']}, {data['temperature']}, {data['duty_cycle']}, {data['power']}")
             self.set_data(data["current"], 
                           data["temperature"],
                           data["duty_cycle"],

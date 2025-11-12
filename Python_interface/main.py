@@ -29,13 +29,13 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         if DEBUG:
-            print(f"{type(self).__name__} - Closing application...")
+            print(f"{type(self).__name__}.closeEvent() - Closing application...")
         self.cleanup()
         event.accept()  # allow the window to close
 
     def cleanup(self):
         if DEBUG:
-            print(f"{type(self).__name__} - Cleaning up resources...")
+            print(f"{type(self).__name__}.cleanup() - Cleaning up resources...")
         self.controller.cleanup()
         self.model.cleanup() # stop timer
         self.view.cleanup()

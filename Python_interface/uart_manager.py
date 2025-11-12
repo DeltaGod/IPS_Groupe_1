@@ -69,14 +69,14 @@ class UARTmanager(Subject):
 
     def start_streaming(self):
         if DEBUG:
-            print(f"{type(self).__name__} - Starting data stream")
+            print(f"{type(self).__name__}.start_streaming()")
         self.send_command(":S\n")
         self._streaming = True
         self.notify()
         
     def stop_streaming(self):
         if DEBUG:
-            print(f"{type(self).__name__} - Stopping data stream")
+            print(f"{type(self).__name__}.stop_streaming()")
         self.send_command(":S0\n")
         self._streaming = False
         self.notify()
@@ -85,7 +85,7 @@ class UARTmanager(Subject):
         try:
             self._ser = serial.Serial(self._port, self._baudrate, timeout=1)
             if DEBUG:
-                print(f"{type(self).__name__} - Connected to {self._port} at {self._baudrate} baud.")
+                print(f"{type(self).__name__}.connect() - Connected to {self._port} at {self._baudrate} baud.")
             time.sleep(2)
         except serial.SerialException as e:
             print(f"Serial error: {e}")
@@ -96,21 +96,21 @@ class UARTmanager(Subject):
         time.sleep(0.2)  # allow STM32 time to process
         if self._ser and self._ser.is_open:
             if DEBUG:
-                print(f"{type(self).__name__} - Closing UART connection...")
+                print(f"{type(self).__name__}.disconnect() - Closing UART connection...")
             self._ser.close()
             if DEBUG:
-                print(f"{type(self).__name__} - Disconnected safely.")
+                print(f"{type(self).__name__}.disconnect() - Disconnected safely.")
 
     def send_command(self, command: str):
         command = str(command)
         if self._ser is not None:
             if DEBUG:
-                print(f"{type(self).__name__} - Sending: {command.strip()}")
+                print(f"{type(self).__name__}.send_command() - Sending: {command.strip()}")
             self._ser.write(command.encode())
 
     def stop_everything(self):
         if DEBUG:
-            print(f"{type(self).__name__} - Stopping thermistance heating and data stream")
+            print(f"{type(self).__name__}.stop_everything() - Stopping thermistance heating and data stream")
         self.send_command(":A\n")
         self._streaming = False
         self.notify()
@@ -120,7 +120,7 @@ class UARTmanager(Subject):
         if self._ser.in_waiting > 0:
             line = self._ser.readline().decode(errors='ignore').strip()
         if DEBUG and line!="":
-            print(f"{type(self).__name__} >> {line}")
+            print(f"{type(self).__name__}.readline() >> {line}")
         return line
     
     def read_data(self):
@@ -132,7 +132,7 @@ class UARTmanager(Subject):
                     "duty cycle": line[2],
                     "power": line[3]}
         if DEBUG and data:
-            print(f"{type(self).__name__} - {data}")
+            print(f"{type(self).__name__}.read_data() - {data}")
         return data
         
 
