@@ -76,6 +76,8 @@
 
 #define SUPPLY_VOLTAGE_V   24.0f
 
+#define CONTROL_DT_S           0.10f                // 100 ms bucle PI (TIM2)
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -104,6 +106,13 @@ volatile uint8_t pwm_test_mode   = 0;
 volatile uint8_t stream_on   = 0;   // 0=OFF, 1=ON
 volatile uint8_t duty_pct    = 0;   // Current duty in % (0..100)
 
+/* === PI control runtime === */
+volatile uint8_t  pi_mode      = 0;                 // 0=OFF, 1=ON
+volatile float    kp           = 12.528630f;        // default
+volatile float    ki           = 0.2527029f;        // default
+volatile float    temp_sp_C    = 25.0f;             // setpoint °C
+static   float    pi_int       = 0.0f;              // integrador (en %)
+
 
 
 /* USER CODE END PV */
@@ -128,7 +137,8 @@ void TIM1_CH1_SetDutyPercent(float duty_pct);
 float           Mesure_current_A(void);
 float           Mesure_Temperature_C(void);
 
-
+static int parse_sp_xdddd(const char *p, float *out_spC);
+static double parse_float_from(const char *p);
 
 /* USER CODE END PFP */
 
@@ -181,6 +191,9 @@ int main(void)
 
   HAL_UART_Receive_IT(&huart2, (uint8_t*)&uart2_rx_byte, 1);
   HAL_TIM_Base_Start_IT(&htim2);
+
+  TIM2_SetPeriod_ms(100);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -530,7 +543,38 @@ static void MX_GPIO_Init(void)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM2) {
-        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin); // Toggle LED L2 (PA5)
+        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin); // Blink diagnostico
+
+        /* === Lazo PI de temperatura === */
+        if (pi_mode && !pwm_test_mode) {
+            float t_C   = Mesure_Temperature_C();
+            float err   = temp_sp_C - t_C;
+
+            /* Acción proporcional (en % directamente) */
+            float u_p   = kp * err;
+
+            /* Integración con anti-windup condicional */
+            float du_i  = ki * err * CONTROL_DT_S;   // incremento del integrador
+            float u_raw = u_p + pi_int;              // antes de saturar
+
+            /* Saturación dura 0..100 % aplicada a la salida */
+            float duty  = u_raw;
+            if (duty > 100.0f) duty = 100.0f;
+            if (duty < 0.0f)   duty = 0.0f;
+
+            /* Anti-windup: solo integramos si no estamos empujando hacia la saturación */
+            int sat_hi = (u_raw >= 100.0f) && (err > 0.0f);
+            int sat_lo = (u_raw <=   0.0f) && (err < 0.0f);
+            if (!(sat_hi || sat_lo)) {
+                pi_int += du_i;
+                /* Acotar el integrador a rango razonable de % */
+                if (pi_int > 100.0f) pi_int = 100.0f;
+                if (pi_int < -100.0f) pi_int = -100.0f;
+            }
+
+            TIM1_CH1_SetDutyPercent(duty);
+            duty_pct = (uint8_t)(duty + 0.5f);
+        }
     }
 }
 
@@ -758,6 +802,8 @@ void TIM1_CH1_SetDutyPercent(float duty_pct)
 }
 
 
+
+
 void uart2_printf(const char *fmt, ...)
 {
     char buf[96];
@@ -793,67 +839,187 @@ void TIM2_SetPeriod_ms(uint32_t ms)
     __HAL_TIM_ENABLE(&htim2);
 }
 
-// Intérprete de comandos (switch-case): buf = "L123" (sin ':')
+/* ---------- Helpers for command parsing (keep near the interpreter) ---------- */
 
+/* Parse a floating-point number after optional spaces. Example: "  12.5" -> 12.5 */
+static double parse_float_from(const char *p) {
+    while (*p == ' ') p++;
+    return strtod(p, NULL);
+}
+
+/* Parse temperature setpoint in the :Xdddd format
+   - Exactly 4 digits: first 3 are integer part, last 1 is tenths (e.g., X1234 -> 123.4°C)
+   - Returns 0 on success and writes to *out_spC; -1 on malformed input. */
+static int parse_sp_xdddd(const char *p, float *out_spC) {
+    while (*p == ' ') p++;
+    const char *q = p;
+
+    /* Require exactly 4 digits */
+    for (int i = 0; i < 4; ++i) {
+        if (q[i] < '0' || q[i] > '9') return -1;
+    }
+    if (q[4] != '\0' && q[4] != ' ' && q[4] != '\r' && q[4] != '\n') {
+        /* Extra junk after 4 digits: reject */
+        return -1;
+    }
+
+    unsigned v = (unsigned)strtoul(p, NULL, 10);  /* e.g., 1234 */
+    *out_spC   = (float)v / 10.0f;                /* 123.4 */
+    return 0;
+}
+
+/* ------------------------------ Command Interpreter ------------------------------ */
+/* buf contains the command WITHOUT the leading ':' and without CR/LF.
+   Examples:
+     ":C" or ":C1" -> enable PI mode
+     ":C0"         -> disable PI mode
+     ":X1234"      -> setpoint = 123.4 °C
+     ":KP12.5"     -> Kp = 12.5
+     ":KI0.25"     -> Ki = 0.25
+     ":K"          -> manual PWM jog mode (K-mode), disables PI
+     ":D50"        -> duty = 50%, disables PI
+     ":S" / ":S0"  -> start/stop streaming
+     ":A"          -> safe stop (everything off)
+*/
 void Command_Interpreter(const char *buf)
 {
     if (!buf || !buf[0]) return;
 
+    /* Normalize main command letter to uppercase */
     char cmd = (char)toupper((unsigned char)buf[0]);
 
+    /* Point to the first character after the main command letter */
     const char *p = buf + 1;
     while (*p == ' ') p++;
+
+    /* Keep val for commands that still want an integer after spaces (e.g., :Dnn) */
     uint32_t val = strtoul(p, NULL, 10);
 
     switch (cmd) {
-    	case 'P':  // :P<num_ms>
-    		TIM2_SetPeriod_ms(val);
-        	uart2_printf("TIM2 period set to %lu ms\r\n", (unsigned long)val);
-        	break;
 
-    	case 'K':   // :K -> start K-mode (manual +/- duty jog) + table (if not streaming)
-    	{
-    	    pwm_test_mode = 1;
-    	    duty_pct = 0;
-    	    TIM1_CH1_SetDutyPercent(0.0f);
-    	    uart2_printf("PWM test START. Use '+' / '-' (±10%%). ENTER to stop.\r\n");
-    	}
-    	break;
+    /* ======== PI mode control ========
+       :C or :C1 -> enable PI (resets integrator, sets duty=0 for safety)
+       :C0       -> disable PI (sets duty=0)
+    */
+    case 'C':
+    {
+        int enable = 1;
+        if (*p == '0') enable = 0;
 
-    	case 'D':  // :Dxxx -> set duty directly (0..100) and stay there
-    	{
-    	    if (val > 100U) val = 100U;
-    	    duty_pct = (uint8_t)val;
-    	    TIM1_CH1_SetDutyPercent((float)duty_pct);
-    	}
-    	break;
+        if (enable) {
+            pwm_test_mode = 0;           /* Leave manual jog if active */
+            pi_mode       = 1;
+            pi_int        = 0.0f;        /* Reset integral term */
+            TIM1_CH1_SetDutyPercent(0.0f);
+            duty_pct = 0;
+            uart2_printf("PI ON (Kp=%.6f, Ki=%.6f, SP=%.1f C)\r\n", kp, ki, temp_sp_C);
+        } else {
+            pi_mode = 0;
+            TIM1_CH1_SetDutyPercent(0.0f);
+            duty_pct = 0;
+            uart2_printf("PI OFF\r\n");
+        }
+    }
+    break;
 
-    	case 'S':  // :S  -> start streaming   |  :S0 -> stop streaming
-    	{
-    	    // Look at the first non-space char after 'S'
-    	    while (*p == ' ') p++;
-    	    if (*p == '0') {
-    	        stream_on = 0;
-    	    } else {
-    	        stream_on = 1;
-    	    }
-    	}
-    	break;
+    /* ======== Temperature setpoint ========
+       :Xdddd -> 4 digits, last is tenths (e.g., X0850 -> 85.0 C)
+       Rejects formats that are not exactly 4 digits.
+    */
+    case 'X':
+    {
+        float spC;
+        if (parse_sp_xdddd(p, &spC) == 0) {
+            temp_sp_C = spC;
+            uart2_printf("SP=%.1f C\r\n", temp_sp_C);
+        } else {
+            uart2_printf("ERR setpoint format (use :Xdddd, e.g., :X1234 -> 123.4 C)\r\n");
+        }
+    }
+    break;
 
-    	case 'A':  // :A -> SAFE STOP (duty=0, streaming OFF, K-mode OFF)
-    	{
-    	    stream_on     = 0;
-    	    pwm_test_mode = 0;
-    	    duty_pct      = 0;
-    	    TIM1_CH1_SetDutyPercent(0.0f);
-    	}
-    	break;
+    /* ======== Gains and K-mode ========
+       :KP<float> -> set Kp
+       :KI<float> -> set Ki
+       :K         -> enter manual PWM jog mode (disables PI)
+    */
+    case 'K':
+    {
+        /* If there's a second letter, it should be P or I for gain edits */
+        char c1 = (char)toupper((unsigned char)p[0]);
 
-        default:
-            uart2_printf("ERR cmd '%c'\r\n", cmd);
-            break;
+        if (c1 == 'P') {
+            double v = parse_float_from(p + 1);
+            kp = (float)v;
+            uart2_printf("Kp=%.6f\r\n", kp);
+        } else if (c1 == 'I') {
+            double v = parse_float_from(p + 1);
+            ki = (float)v;
+            uart2_printf("Ki=%.6f\r\n", ki);
+        } else if (p[0] == '\0') {
+            /* Bare :K -> enter manual jog mode */
+            pwm_test_mode = 1;
+            pi_mode       = 0;            /* PI off while in manual */
+            duty_pct      = 0;
+            TIM1_CH1_SetDutyPercent(0.0f);
+            uart2_printf("PWM test START. Use '+' / '-' (±10%%). ENTER to stop.\r\n");
+        } else {
+            uart2_printf("ERR cmd 'K%.*s'\r\n", 4, p);
+        }
+    }
+    break;
+
+    /* ======== Direct duty command ========
+       :Dnn -> duty in % (0..100). Disables PI.
+    */
+    case 'D':
+    {
+        if (val > 100U) val = 100U;
+        pi_mode  = 0;                     /* leave PI if forcing duty */
+        duty_pct = (uint8_t)val;
+        TIM1_CH1_SetDutyPercent((float)duty_pct);
+        uart2_printf("Duty=%lu %% (PI OFF)\r\n", (unsigned long)val);
+    }
+    break;
+
+    /* ======== Streaming ========
+       :S  -> start streaming
+       :S0 -> stop streaming
+    */
+    case 'S':
+    {
+        if (*p == '0') {
+            stream_on = 0;
+            uart2_printf("Stream OFF\r\n");
+        } else {
+            stream_on = 1;
+            uart2_printf("Stream ON\r\n");
+        }
+    }
+    break;
+
+    /* ======== Safe stop ========
+       :A -> immediate safe stop (stream OFF, K-mode OFF, PI OFF, duty=0)
+    */
+    case 'A':
+    {
+        stream_on     = 0;
+        pwm_test_mode = 0;
+        pi_mode       = 0;
+        duty_pct      = 0;
+        pi_int        = 0.0f;
+        TIM1_CH1_SetDutyPercent(0.0f);
+        uart2_printf("SAFE STOP\r\n");
+    }
+    break;
+
+    /* ======== Unknown command ======== */
+    default:
+        uart2_printf("ERR cmd '%c'\r\n", cmd);
+        break;
     }
 }
+
 
 /* USER CODE END 4 */
 
