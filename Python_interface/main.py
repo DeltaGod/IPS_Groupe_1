@@ -29,13 +29,13 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         if DEBUG:
-            print("Closing application...")
+            print(f"{type(self).__name__} - Closing application...")
         self.cleanup()
         event.accept()  # allow the window to close
 
     def cleanup(self):
         if DEBUG:
-            print("Cleaning up resources...")
+            print(f"{type(self).__name__} - Cleaning up resources...")
         self.controller.cleanup()
         self.model.cleanup() # stop timer
         self.view.cleanup()
@@ -58,5 +58,11 @@ if __name__ == "__main__":
 
     window = MainWindow()
     window.show()
+
+    # force connexion to UART
+    # TODO: once the port selection menu is done, remove these lines
+    window.model.set_baudrate(115200)
+    window.model.set_port("COM8")
+    window.model.set_is_connected(True)
 
     sys.exit(app.exec())

@@ -15,7 +15,7 @@ class Subject(object):
         if not callable(getattr(obs,"update")) :
             raise ValueError("Observer must have an update() method")
         self.observers.append(obs)
-        obs.update(self)
+        # obs.update(self)
 
     def detach(self,obs):
         if obs in self.observers :

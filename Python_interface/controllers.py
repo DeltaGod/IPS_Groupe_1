@@ -2,35 +2,47 @@
 # coding: utf-8
 DEBUG=False
 
-# from can_bus_manager import CanBusManager
-
 class MainController:
     def __init__(self, view, model):
         self.view = view
         self.model = model
-        self.lux_dist=True
+        self.model.attach(self.view)
     
     def bind_callbacks(self):
         if DEBUG :
-            print(f"bind_callbacks()")
+            print(f"{type(self).__name__}")
+        self.view.on_button.clicked.connect(self.on_btn_clicked)
+        self.view.off_button.clicked.connect(self.off_btn_clicked)
 
-    def mtr_off_btn_clicked(self):
-        self.model.set_motor_mode(0)
+    def temperature_setpoint_btn_clicked(self):
+        # TODO
+        raise NotImplementedError
 
-    def mtr_on_btn_clicked(self):
-        self.model.set_motor_mode(1)
+    def on_btn_clicked(self):
+        try:
+            # TODO: once connexion feature is added seperately, change this line
+            # check UART connexion
+            self.model.set_is_connected(True)
+            # start data stream
+            self.model.set_is_running(True)
+            # [optional) send temperature setpoint to UART
+            # self.model.set_temperature(0.0)
+        except Exception as e:
+            print(f"Unable to start: {e}")
 
-    def mtr_auto_btn_clicked(self):
-        self.model.set_motor_mode(2)
-
-    def switch_light_dist_btn_clicked(self):
-        self.model.switch_LIGHT_MODE()
+    def off_btn_clicked(self):
+        try:
+            self.model.set_is_running(False)
+        except Exception as e:
+            print(f"Unable to start: {e}")
 
     def fetch_data(self):
+        # TODO
         raise NotImplementedError
 
     def cleanup(self):
-        pass
+        # TODO
+        pass # we can do without for now
 
     
 
@@ -40,8 +52,8 @@ if __name__ == "__main__":
     print(">> Testing controllers.py <<")
 
     if SCENARIO==1:
-        from views import MainWindow
-        view = MainWindow()
+        from views import MainView
+        view = MainView()
         controller = MainController(view)
     else:
         print("Nothing to test.")

@@ -1,13 +1,5 @@
 # uart_manager.py
-'''
-:Dxxx = change duty cycle
-:S = start data stream
-:S0 = stop data stream
-:A = tout stopper (Dty cycle à 0 et stopper le data stream)
-Courant, Température, Duty Cycle Actuel, Puissance estimée de la thermistance
-\n = EOL -> to detect when 1 line of data ends
-line format: Current;Temperature;DutyCycle;Power\n
-'''
+# coding: utf-8
 DEBUG = True
 
 import serial
@@ -15,66 +7,85 @@ import time
 import atexit
 import sys
 
+from observer import Subject
 
-class UARTmanager():
+'''
+## UART Communication commands:
+    :Dxxx = change duty cycle
+    :S = start data stream
+    :S0 = stop data stream
+    :A = stop everything (duty_cycle=0 & stop data stream)
+## UART data formatting
+    \n = EOL -> to detect when 1 line of data ends
+    line format: Current;Temperature;DutyCycle;Power\n
+'''
+class UARTmanager(Subject):
 
     def __init__(self):
-        self.duty_cycle = None
-        self.streaming  = False
-        self.port       = None # or "/dev/ttyUSB0" on Linux 
-        # Adjust to your COM port or /dev/ttyUSBx
-        self.baudrate   = None
-        self.ser = None
-        # Register automatic safety on program exit
-        atexit.register(self.disconnect)
-    
-    def notify(self):
-        pass
+        super().__init__()
+        self._duty_cycle    = None
+        self._temperature_setpoint   = None
+        self._streaming     = False
+        self._port          = None # Adjust to your COM port or /dev/ttyUSBx
+        self._baudrate      = None # standard is 115200
+        self._ser           = None # serial connexion with UART
+        atexit.register(self.disconnect) # Register automatic safety on program exit
     
     # ----- setters -----
     def set_duty_cycle(self, duty_cycle: int):
+        '''duty_cycle: int between 0-100 (%)'''
         self.send_command(f":D{duty_cycle}\n")
-        self.duty_cycle = duty_cycle
+        self._duty_cycle = duty_cycle
+        self.notify()
+    def set_temperature_setpoint(self, temperature: float):
+        '''temperature: float between 0.0-999.9, precision is 1 decimal only'''
+        temperature=int(temperature*10)
+        self.send_command(f":X{temperature}\n")
+        self._temperature_setpoint = temperature
         self.notify()
     def set_port(self, port: str):
+        '''port: "COM0" or "COMX" on windows, "/dev/ttyUSB0" or "/dev/ttyUSBx" on linux'''
         self.disconnect()
-        self.port = port
+        self._port = port
         self.notify()
     def set_baudrate(self, baudrate: int):
+        '''baudrate: standard is 115200 (Hz)'''
         self.disconnect()
-        self.baudrate = baudrate
+        self._baudrate = baudrate
         self.notify()
     # ----- getters -----
     def get_duty_cycle(self):
-        return self.duty_cycle
+        return self._duty_cycle
+    def get_temperature_setpoint(self):
+        return self._temperature_setpoint
     def get_port(self):
-        return self.port
+        return self._port
     def get_baudrate(self):
-        return self.baudrate
+        return self._baudrate
     # def get_ser(self):
-    #     return self.ser
+    #     return self._ser
     def get_streaming_state(self):
-        return self.streaming
+        return self._streaming
 
     def start_streaming(self):
         if DEBUG:
-            print("Starting data stream")
+            print(f"{type(self).__name__} - Starting data stream")
         self.send_command(":S\n")
-        self.streaming = True
+        self._streaming = True
         self.notify()
         
     def stop_streaming(self):
         if DEBUG:
-            print("Stopping data stream")
+            print(f"{type(self).__name__} - Stopping data stream")
         self.send_command(":S0\n")
-        self.streaming = False
+        self._streaming = False
         self.notify()
         
     def connect(self):
         try:
-            self.ser = serial.Serial(self.port, self.baudrate, timeout=1)
+            self._ser = serial.Serial(self._port, self._baudrate, timeout=1)
             if DEBUG:
-                print(f"Connected to {self.port} at {self.baudrate} baud.")
+                print(f"{type(self).__name__} - Connected to {self._port} at {self._baudrate} baud.")
             time.sleep(2)
         except serial.SerialException as e:
             print(f"Serial error: {e}")
@@ -83,33 +94,33 @@ class UARTmanager():
     def disconnect(self):
         self.stop_everything()
         time.sleep(0.2)  # allow STM32 time to process
-        if self.ser and self.ser.is_open:
+        if self._ser and self._ser.is_open:
             if DEBUG:
-                print("Closing UART connection...")
-            self.ser.close()
+                print(f"{type(self).__name__} - Closing UART connection...")
+            self._ser.close()
             if DEBUG:
-                print("Disconnected safely.")
+                print(f"{type(self).__name__} - Disconnected safely.")
 
     def send_command(self, command: str):
         command = str(command)
-        if self.ser is not None:
+        if self._ser is not None:
             if DEBUG:
-                print(f"Sending: {command.strip()}")
-            self.ser.write(command.encode())
+                print(f"{type(self).__name__} - Sending: {command.strip()}")
+            self._ser.write(command.encode())
 
     def stop_everything(self):
         if DEBUG:
-            print("Stopping thermistance heating and data stream")
+            print(f"{type(self).__name__} - Stopping thermistance heating and data stream")
         self.send_command(":A\n")
-        self.streaming = False
+        self._streaming = False
         self.notify()
     
     def readline(self):
         line=""
-        if self.ser.in_waiting > 0:
-            line = self.ser.readline().decode(errors='ignore').strip()
+        if self._ser.in_waiting > 0:
+            line = self._ser.readline().decode(errors='ignore').strip()
         if DEBUG and line!="":
-            print(f">> {line}")
+            print(f"{type(self).__name__} >> {line}")
         return line
     
     def read_data(self):
@@ -121,7 +132,7 @@ class UARTmanager():
                     "duty cycle": line[2],
                     "power": line[3]}
         if DEBUG and data:
-            print(data)
+            print(f"{type(self).__name__} - {data}")
         return data
         
 
@@ -130,9 +141,12 @@ if __name__ == "__main__" :
 
     uart = UARTmanager()
 
+    uart._baudrate = 115200
+    uart._port = "COM8"
+
     uart.connect()
     uart.start_streaming()
     uart.set_duty_cycle(50)
 
     while True:
-        uart.get_data()
+        uart.read_data()
