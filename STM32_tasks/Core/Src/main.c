@@ -46,7 +46,7 @@
 #define ISENSE_ADC_CHANNEL      ADC_CHANNEL_0   /* A0 = PA0 on Nucleo F411RE */
 #define TEMP_ADC_CHANNEL        ADC_CHANNEL_1   /* A1 = PA1 on Nucleo F411RE */
 
-#define ISENSE_RSHUNT_OHMS      0.05f           // 50 mΩ
+#define ISENSE_RSHUNT_OHMS      0.096f          // 50 mΩ normaly, changed for calibrating a good mesurement.
 #define ISENSE_AD623_RG_OHMS    4300.0f         // 4.3k
 #define ISENSE_AD623_GAIN       (1.0f + 49400.0f / ISENSE_AD623_RG_OHMS)
 #define ISENSE_AD623_VREF_V     0.0f            // REF = GND
@@ -95,16 +95,16 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 volatile uint8_t  uart2_rx_byte;           // byte recived in Interrupt
-volatile int16_t  last_sent_pct   = -1;  // last %
+volatile int16_t  last_sent_pct         = -1;  // last %
 
-volatile uint8_t  cmd_idx = 0;             // index
+volatile uint8_t  cmd_idx               = 0;             // index
 volatile char     cmd_buf[CMD_BUF_LEN];    // buffer
 
-volatile uint8_t pwm_test_mode   = 0;
+volatile uint8_t pwm_test_mode          = 0;
 
 /* === New runtime state === */
-volatile uint8_t stream_on   = 0;   // 0=OFF, 1=ON
-volatile uint8_t duty_pct    = 0;   // Current duty in % (0..100)
+volatile uint8_t stream_on              = 0;   // 0=OFF, 1=ON
+volatile uint8_t duty_pct               = 0;   // Current duty in % (0..100)
 
 /* === PI control runtime === */
 volatile uint8_t  pi_mode      = 0;                 // 0=OFF, 1=ON
@@ -113,6 +113,11 @@ volatile float    ki           = 0.2527029f;        // default
 volatile float    temp_sp_C    = 25.0f;             // setpoint °C
 static   float    pi_int       = 0.0f;              // integrador (en %)
 
+/* === Cached measurements updated only in TIM2 ISR === */
+volatile float g_i_A           = 0.0f;  // current [A]
+volatile float g_t_C           = 0.0f;  // temperature [°C]
+volatile float g_vraw_a0       = 0.0f;  // raw ADC volts ch0 (current front-end)
+volatile float g_vraw_a1       = 0.0f;  // raw ADC volts ch1 (temp front-end)
 
 
 /* USER CODE END PV */
@@ -205,38 +210,28 @@ int main(void)
        * Emits: Corriente;Temperatura;DuttyCycle;Potencia\n
        * Potencia = 24V * (duty%/100) * Corriente
        */
-      if (stream_on) {
-          float i_A = Mesure_current_A();
-          float t_C = Mesure_Temperature_C();
-          float p_W = SUPPLY_VOLTAGE_V * ((float)duty_pct / 100.0f) * i_A;
+	  if (stream_on) {
+	      float i_A = g_i_A;
+	      float t_C = g_t_C;
+	      float p_W = SUPPLY_VOLTAGE_V * ((float)duty_pct / 100.0f) * i_A;
+	      uart2_printf("%.4f;%.2f;%u;%.2f\r\n", i_A, t_C, (unsigned)duty_pct, p_W);
+	      HAL_Delay(100);
+	      continue;
+	  }
 
-          /* Format EXACTLY: Corriente;Temperatura;DuttyCycle;Potencia\n */
-          uart2_printf("%.4f;%.2f;%u;%.2f\r\n",
-                       i_A, t_C, (unsigned)duty_pct, p_W);
+	  if (pwm_test_mode) {
+	      static uint8_t header_printed_k = 0;
+	      if (!header_printed_k) {
+	          uart2_printf("\r\nVraw_I [V]\tI [A]\tVraw_T [V]\tT [°C]\tDuty [%]\r\n");
+	          header_printed_k = 1;
+	      }
 
-          HAL_Delay(100);   // ~10 Hz stream
-          continue;
-      }
+	      uart2_printf("%.4f [V]\t%.4f [A]\t%.4f [V]\t%.2f [°C]\t%u [%%]\r\n",
+	                   g_vraw_a0, g_i_A, g_vraw_a1, g_t_C, (unsigned)duty_pct);
 
-      /* ===== Test mode :K (prints only when streaming is OFF) ===== */
-      if (pwm_test_mode) {
-          static uint8_t header_printed_k = 0;
-          if (!header_printed_k) {
-              uart2_printf("\r\nVraw_I [V]\tI [A]\tVraw_T [V]\tT [°C]\tDuty [%]\r\n");
-              header_printed_k = 1;
-          }
-
-          float vraw_a0 = ADC1_Read_Average_V(ISENSE_ADC_CHANNEL);
-          float vraw_a1 = ADC1_Read_Average_V(TEMP_ADC_CHANNEL);
-          float i_A     = Mesure_current_A();
-          float t_C     = Mesure_Temperature_C();
-
-          uart2_printf("%.4f [V]\t%.4f [A]\t%.4f [V]\t%.2f [°C]\t%u [%%]\r\n",
-                       vraw_a0, i_A, vraw_a1, t_C, (unsigned)duty_pct);
-
-          HAL_Delay(100);
-          continue;
-      }
+	      HAL_Delay(100);
+	      continue;
+	  }
 
 
 
@@ -246,6 +241,7 @@ int main(void)
   }
   /* USER CODE END 3 */
 }
+
 /**
   * @brief System Clock Configuration
   * @retval None
@@ -542,40 +538,40 @@ static void MX_GPIO_Init(void)
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    if (htim->Instance == TIM2) {
-        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin); // Blink diagnostico
+	if (htim->Instance == TIM2) {
+	    HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 
-        /* === Lazo PI de temperatura === */
-        if (pi_mode && !pwm_test_mode) {
-            float t_C   = Mesure_Temperature_C();
-            float err   = temp_sp_C - t_C;
+	    /* --- Single-producer: take all ADC readings here --- */
+	    g_vraw_a0 = ADC1_Read_Average_V(ISENSE_ADC_CHANNEL);
+	    g_vraw_a1 = ADC1_Read_Average_V(TEMP_ADC_CHANNEL);
+	    g_i_A     = Mesure_current_A();      // usa ADC internamente, pero ya no hay otro lector
+	    g_t_C     = Mesure_Temperature_C();  // idem
 
-            /* Acción proporcional (en % directamente) */
-            float u_p   = kp * err;
+	    /* --- PI loop uses cached temperature --- */
+	    if (pi_mode && !pwm_test_mode) {
+	        float t_C = g_t_C;
+	        float err = temp_sp_C - t_C;
 
-            /* Integración con anti-windup condicional */
-            float du_i  = ki * err * CONTROL_DT_S;   // incremento del integrador
-            float u_raw = u_p + pi_int;              // antes de saturar
+	        float u_p   = kp * err;
+	        float du_i  = ki * err * CONTROL_DT_S;
+	        float u_raw = u_p + pi_int;
 
-            /* Saturación dura 0..100 % aplicada a la salida */
-            float duty  = u_raw;
-            if (duty > 100.0f) duty = 100.0f;
-            if (duty < 0.0f)   duty = 0.0f;
+	        float duty  = u_raw;
+	        if (duty > 100.0f) duty = 100.0f;
+	        if (duty < 0.0f)   duty = 0.0f;
 
-            /* Anti-windup: solo integramos si no estamos empujando hacia la saturación */
-            int sat_hi = (u_raw >= 100.0f) && (err > 0.0f);
-            int sat_lo = (u_raw <=   0.0f) && (err < 0.0f);
-            if (!(sat_hi || sat_lo)) {
-                pi_int += du_i;
-                /* Acotar el integrador a rango razonable de % */
-                if (pi_int > 100.0f) pi_int = 100.0f;
-                if (pi_int < -100.0f) pi_int = -100.0f;
-            }
+	        int sat_hi = (u_raw >= 100.0f) && (err > 0.0f);
+	        int sat_lo = (u_raw <=   0.0f) && (err < 0.0f);
+	        if (!(sat_hi || sat_lo)) {
+	            pi_int += du_i;
+	            if (pi_int > 100.0f)  pi_int = 100.0f;
+	            if (pi_int < -100.0f) pi_int = -100.0f;
+	        }
 
-            TIM1_CH1_SetDutyPercent(duty);
-            duty_pct = (uint8_t)(duty + 0.5f);
-        }
-    }
+	        TIM1_CH1_SetDutyPercent(duty);
+	        duty_pct = (uint8_t)(duty + 0.5f);
+	    }
+	}
 }
 
 
@@ -783,6 +779,7 @@ float Mesure_Temperature_C(void)
 
     return T_C;
 }
+
 
 /* Set TIM1 CH1 duty in percent (0..100)  (HEATING RESISTENCE DUTTY-CYCLE)*/
 // Apply duty in % to TIM1 CH1 and force the update immediately
