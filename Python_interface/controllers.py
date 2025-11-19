@@ -13,14 +13,16 @@ class MainController:
             print(f"{type(self).__name__}.bind_callbacks()")
         self.view.on_button.clicked.connect(self.on_btn_clicked)
         self.view.off_button.clicked.connect(self.off_btn_clicked)
+        self.view.temperature_setpoint_inputbutton.clicked.connect(self.temperature_setpoint_btn_clicked)
 
     def temperature_setpoint_btn_clicked(self):
         # TODO
+        # send 
         raise NotImplementedError
 
     def on_btn_clicked(self):
         try:
-            # TODO: once connexion feature is added seperately, change this line
+            # TODO once connexion feature is added seperately, change this line.
             # check UART connexion
             self.model.set_is_connected(True)
             # start data stream
