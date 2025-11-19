@@ -1,6 +1,6 @@
 # controllers.py
 # coding: utf-8
-DEBUG=False
+DEBUG=True
 
 class MainController:
     def __init__(self, view, model):
@@ -16,9 +16,19 @@ class MainController:
         self.view.temperature_setpoint_inputbutton.clicked.connect(self.temperature_setpoint_btn_clicked)
 
     def temperature_setpoint_btn_clicked(self):
-        # TODO
-        # send 
-        raise NotImplementedError
+        # send setpoint to the card (through model's setpoint)
+        new_setpoint = self.view.get_typed_temperature_setpoint()
+        if DEBUG:
+            print(f"{type(self).__name__}.setpoint_btn_clicked() - New setpoint: {new_setpoint}")
+        try:
+            self.model.set_temperature_setpoint(new_setpoint)
+        except Exception as e:
+            if DEBUG:
+                print(f"{type(self).__name__}.setpoint_btn_clicked() - Unable to set new setpoint:{e}")
+        # clear entrybox
+        self.view.clear_temperature_setpoint_inputbox()
+        # update setpoint display
+        ## automatically done thanks to observer pattern
 
     def on_btn_clicked(self):
         try:
@@ -30,13 +40,13 @@ class MainController:
             # [optional) send temperature setpoint to UART
             # self.model.set_temperature(0.0)
         except Exception as e:
-            print(f"Unable to start: {e}")
+            print(f"{type(self).__name__}.on_btn_clicked() - Unable to start: {e}")
 
     def off_btn_clicked(self):
         try:
             self.model.set_is_running(False)
         except Exception as e:
-            print(f"Unable to start: {e}")
+            print(f"{type(self).__name__}.off_btn_clicked() - Unable to stop: {e}")
 
     def fetch_data(self):
         # TODO

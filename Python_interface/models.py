@@ -85,11 +85,12 @@ class MainModel(Subject, Observer):
         self.notify()
     def set_temperature_setpoint(self, temperature_setpoint: float):
         '''
-        temperature: float between 0.0-999.9 (°C)  
-        precision is 1 decimal only
+        temperature: float between 0.0-999.9 (°C), precision is 1 decimal only  
+        Tries to set the temperature setpoint of the card. If something fails this is a no-op.
         '''
         self._uart.set_temperature_setpoint(temperature_setpoint)
-        self._temperature_setpoint = temperature_setpoint
+        # self._temperature_setpoint = temperature_setpoint
+        self._temperature_setpoint = self._uart.get_temperature_setpoint()
         self.notify()
     def set_data(self, current, temperature, duty_cycle, power):
         self._current = current

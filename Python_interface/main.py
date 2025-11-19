@@ -67,5 +67,5 @@ if __name__ == "__main__":
         window.model.set_is_connected(True)
     except Exception as e:
         if DEBUG:
-            print(f"Connection failed: {e}")
+            print(f"main.py - Connection failed: {e}")
     sys.exit(app.exec())

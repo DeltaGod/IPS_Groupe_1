@@ -41,7 +41,7 @@ class UARTmanager(Subject):
         '''temperature: float between 0.0-999.9, precision is 1 decimal only'''
         temperature=int(temperature*10)
         self.send_command(f":X{temperature}\n")
-        self._temperature_setpoint = temperature
+        self._temperature_setpoint = temperature/10
         self.notify()
     def set_port(self, port: str):
         '''port: "COM0" or "COMX" on windows, "/dev/ttyUSB0" or "/dev/ttyUSBx" on linux'''

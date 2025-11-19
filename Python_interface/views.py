@@ -239,6 +239,13 @@ class MainView(Observer, QWidget):
         self.power_data.setText(text)
         pass
 
+    def get_typed_temperature_setpoint(self):
+        return int(self.temperature_setpoint_inputbox.text())
+    
+    def clear_temperature_setpoint_inputbox(self):
+        self.temperature_setpoint_inputbox.setText("")
+        
+
 ## ======================
 ## TESTING SOME STUFF
 ## ======================
