@@ -63,6 +63,9 @@ if __name__ == "__main__":
     # TODO: once the port selection menu is done, remove these lines
     window.model.set_baudrate(115200)
     window.model.set_port("COM8")
-    window.model.set_is_connected(True)
-
+    try:
+        window.model.set_is_connected(True)
+    except Exception as e:
+        if DEBUG:
+            print(f"Connection failed: {e}")
     sys.exit(app.exec())

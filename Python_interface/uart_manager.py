@@ -129,7 +129,7 @@ class UARTmanager(Subject):
         if len(line) > 3:
             data = {"current": line[0],
                     "temperature": line[1],
-                    "duty cycle": line[2],
+                    "duty_cycle": line[2],
                     "power": line[3]}
         if DEBUG and data:
             print(f"{type(self).__name__}.read_data() - {data}")

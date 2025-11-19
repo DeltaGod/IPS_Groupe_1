@@ -127,13 +127,14 @@ class MainModel(Subject, Observer):
         if DEBUG:
             print(f"{type(self).__name__}.fetch_measures()")
         if data :
+            current = data["current"]
+            temperature = data["temperature"]
+            duty_cycle = data["duty_cycle"]
+            power = data["power"]
             if DEBUG:
                 print(f"{type(self).__name__}.fetch_measures() - {data}")
-                print(f"{type(self).__name__}.fetch_measures() - {data['current']}, {data['temperature']}, {data['duty_cycle']}, {data['power']}")
-            self.set_data(data["current"], 
-                          data["temperature"],
-                          data["duty_cycle"],
-                          data["power"])
+                print(f"{type(self).__name__}.fetch_measures() - {current}, {temperature}, {duty_cycle}, {power}")
+            self.set_data(current, temperature, duty_cycle, power)
     
     def update(self, subject):
         if DEBUG:
