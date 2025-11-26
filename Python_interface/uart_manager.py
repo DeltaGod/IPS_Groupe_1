@@ -49,7 +49,7 @@ class UARTmanager(Subject):
                 command="0"+str(command)
             command=str(command)
             self.send_command(f":X{command}\n")
-            self.send_command(f":C1")
+            self.send_command(f":C1\n")
         self._temperature_setpoint = temperature
         self.notify()
     def set_port(self, port: str):
