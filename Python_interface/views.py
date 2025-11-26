@@ -243,7 +243,16 @@ class MainView(Observer, QWidget):
         pass
 
     def get_typed_temperature_setpoint(self):
-        return int(self.temperature_setpoint_inputbox.text())
+        text = self.temperature_setpoint_inputbox.text()
+        if text == "":
+            return None
+        try:
+            setpoint = float(text)
+            if DEBUG:
+                print(f"{__name__}.get_typed_temperature_setpoint() -> {setpoint}")
+            return setpoint
+        except ValueError:
+            return None
     
     def clear_temperature_setpoint_inputbox(self):
         self.temperature_setpoint_inputbox.setText("")

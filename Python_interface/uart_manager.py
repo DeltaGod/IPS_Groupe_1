@@ -34,12 +34,12 @@ class UARTmanager(Subject):
     # ----- setters -----
     def set_duty_cycle(self, duty_cycle: int):
         '''duty_cycle: int between 0-100 (%)'''
-        self.send_command(f":D{duty_cycle}\n")
+        self.send_command(f":D{duty_cycle}\r\n")
         self._duty_cycle = duty_cycle
         self.notify()
     def set_temperature_setpoint(self, temperature: float):
         '''temperature: float between 0.0-999.9, precision is 1 decimal only'''
-        if temperature:
+        if temperature is not None:
             command=int(temperature*10)
             if command<10:
                 command="000"+str(command)
@@ -48,9 +48,9 @@ class UARTmanager(Subject):
             elif command<1000:
                 command="0"+str(command)
             command=str(command)
-            self.send_command(f":X{command}\n")
+            self.send_command(f":X{command}\r\n")
             time.sleep(0.05)
-            self.send_command(f":C1\n")
+            self.send_command(f":C1\r\n")
         self._temperature_setpoint = temperature
         self.notify()
     def set_port(self, port: str):
@@ -80,14 +80,14 @@ class UARTmanager(Subject):
     def start_streaming(self):
         if DEBUG:
             print(f"{type(self).__name__}.start_streaming()")
-        self.send_command(":S\n")
+        self.send_command(":S\r\n")
         self._streaming = True
         self.notify()
         
     def stop_streaming(self):
         if DEBUG:
             print(f"{type(self).__name__}.stop_streaming()")
-        self.send_command(":S0\n")
+        self.send_command(":S0\r\n")
         self._streaming = False
         self.notify()
         
@@ -121,7 +121,7 @@ class UARTmanager(Subject):
     def stop_everything(self):
         if DEBUG:
             print(f"{type(self).__name__}.stop_everything() - Stopping thermistance heating and data stream")
-        self.send_command(":A\n")
+        self.send_command(":A\r\n")
         self._streaming = False
         self.notify()
     
