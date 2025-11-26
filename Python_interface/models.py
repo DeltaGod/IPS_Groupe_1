@@ -14,7 +14,7 @@ class MainModel(Subject, Observer):
         self._is_connected = False
         self._is_running = False
 
-        self._refreshing_frequency = 10 # Hz
+        self._refreshing_frequency = 20 # Hz
         self._timer = Timer(1/self._refreshing_frequency)
         self._timer.attach(self)
 
