@@ -43,7 +43,8 @@ class MainWindow(QMainWindow):
 
     def _createMenuBar(self):
         menuBar = QMenuBar(self)
-        menuBar.addMenu("menu")
+        menu = menuBar.addMenu("&Menu")
+        # menu.addAction(set_port_button)
         self.setMenuBar(menuBar)
 
     

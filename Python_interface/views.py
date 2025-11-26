@@ -26,67 +26,70 @@ class MainView(Observer, QWidget):
         ## -----------------
         ## VISUAL PARAMETERS
         ## -----------------
-        self.setMinimumSize(590, 300)
+        self.setMinimumSize(790, 350)
         # Fonts parameters
         self.fontfamily = "Arial"
         self.titlefont = QFont(self.fontfamily, 12, QFont.Weight.Bold)
         self.labelfont = QFont(self.fontfamily, 10)
         self.notefont = QFont(self.fontfamily, 18)
+        labels_width = 140
+        labels_height = 50
+        data_width = 80
+        title_width = 250
+        title_height = 40
 
         ## ---------------
         ## DATA WIDGETS
         ## ---------------
-        labels_width = 90
-        data_width = 50
         # Title
         self.data_section_title = QLabel("MEASURED DATA")
-        self.data_section_title.setMinimumSize(100, 20)
-        self.data_section_title.setMaximumSize(100+50, 40)
+        self.data_section_title.setMinimumSize(title_width, title_height)
+        self.data_section_title.setMaximumSize(title_width+50, title_height+20)
         # Temperature
         self.temperature_label = QLabel("Temperature")
-        self.temperature_label.setMinimumSize(labels_width, 0)
-        self.temperature_label.setMaximumSize(labels_width+50, 40)
+        self.temperature_label.setMinimumSize(labels_width, labels_height)
+        self.temperature_label.setMaximumSize(labels_width+50, labels_height+20)
         self.temperature_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.temperature_label.setContentsMargins(5, 10, 5, 5)
         self.temperature_data = QLabel("-- °C")
-        self.temperature_data.setMinimumSize(data_width, 0)
-        self.temperature_data.setMaximumSize(data_width+50, 40)
+        self.temperature_data.setMinimumSize(data_width, labels_height)
+        self.temperature_data.setMaximumSize(data_width+50, labels_height+20)
         self.temperature = QHBoxLayout()
         self.temperature.addWidget(self.temperature_label)
         self.temperature.addWidget(self.temperature_data)
         # Current
         self.current_label = QLabel("Current")
-        self.current_label.setMinimumSize(labels_width, 0)
-        self.current_label.setMaximumSize(labels_width+50, 40)
+        self.current_label.setMinimumSize(labels_width, labels_height)
+        self.current_label.setMaximumSize(labels_width+50, labels_height+20)
         self.current_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.current_label.setContentsMargins(5, 10, 5, 5)
         self.current_data = QLabel("-- A")
-        self.current_data.setMinimumSize(data_width, 0)
-        self.current_data.setMaximumSize(data_width+50, 40)
+        self.current_data.setMinimumSize(data_width, labels_height)
+        self.current_data.setMaximumSize(data_width+50, labels_height+20)
         self.current = QHBoxLayout()
         self.current.addWidget(self.current_label)
         self.current.addWidget(self.current_data)
         # Duty Cycle
         self.duty_cycle_label = QLabel("Duty Cycle")
-        self.duty_cycle_label.setMinimumSize(labels_width, 0)
-        self.duty_cycle_label.setMaximumSize(labels_width+50, 40)
+        self.duty_cycle_label.setMinimumSize(labels_width, labels_height)
+        self.duty_cycle_label.setMaximumSize(labels_width+50, labels_height+20)
         self.duty_cycle_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.duty_cycle_label.setContentsMargins(5, 10, 5, 5)
         self.duty_cycle_data = QLabel("-- %")
-        self.duty_cycle_data.setMinimumSize(data_width, 0)
-        self.duty_cycle_data.setMaximumSize(data_width+50, 40)
+        self.duty_cycle_data.setMinimumSize(data_width, labels_height)
+        self.duty_cycle_data.setMaximumSize(data_width+50, labels_height+20)
         self.duty_cycle = QHBoxLayout()
         self.duty_cycle.addWidget(self.duty_cycle_label)
         self.duty_cycle.addWidget(self.duty_cycle_data)
         # Power
         self.power_label = QLabel("Power")
-        self.power_label.setMinimumSize(labels_width, 0)
-        self.power_label.setMaximumSize(labels_width+50, 40)
+        self.power_label.setMinimumSize(labels_width, labels_height)
+        self.power_label.setMaximumSize(labels_width+50, labels_height+20)
         self.power_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.power_label.setContentsMargins(5, 10, 5, 5)
         self.power_data = QLabel("--W")
-        self.power_data.setMinimumSize(data_width, 0)
-        self.power_data.setMaximumSize(data_width+50, 40)
+        self.power_data.setMinimumSize(data_width, labels_height)
+        self.power_data.setMaximumSize(data_width+50, labels_height+20)
         self.power = QHBoxLayout()
         self.power.addWidget(self.power_label)
         self.power.addWidget(self.power_data)
@@ -113,24 +116,24 @@ class MainView(Observer, QWidget):
         ## ---------------
         # Title
         self.ctrls_section_title = QLabel("THERMISTANCE CONTROL")
-        self.ctrls_section_title.setMinimumSize(150, 0)
+        self.ctrls_section_title.setMinimumSize(title_width, title_height)
         # self.ctrls_section_title.setMaximumSize(150+50, 40)
-        self.ctrls_section_title.setMaximumHeight(30)
+        self.ctrls_section_title.setMaximumHeight(title_height+20)
         self.ctrls_section_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.ctrls_section_title.setContentsMargins(5, 5, 5, 5)
         # Temperature setpoint
         self.temperature_setpoint_label = QLabel("Setpoint")
-        self.temperature_setpoint_label.setMinimumSize(labels_width, 0)
-        self.temperature_setpoint_label.setMaximumSize(labels_width+50, 40)
+        self.temperature_setpoint_label.setMinimumSize(labels_width, labels_height)
+        self.temperature_setpoint_label.setMaximumSize(labels_width+50, labels_height+20)
         self.temperature_setpoint_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.temperature_setpoint_label.setContentsMargins(5, 10, 5, 5)
         self.temperature_setpoint_display = QLabel("-- °C")
         self.temperature_setpoint_display.setStyleSheet("border: 1px solid lightgrey;")
-        self.temperature_setpoint_display.setMinimumSize(data_width, 0)
-        self.temperature_setpoint_display.setMaximumSize(data_width+50, 40)
+        self.temperature_setpoint_display.setMinimumSize(data_width, labels_height)
+        self.temperature_setpoint_display.setMaximumSize(data_width+50, labels_height+20)
         self.temperature_setpoint_inputbox = QLineEdit("")
-        self.temperature_setpoint_inputbox.setMinimumSize(data_width, 0)
-        self.temperature_setpoint_inputbox.setMaximumSize(data_width+50, 40)
+        self.temperature_setpoint_inputbox.setMinimumSize(data_width, labels_height)
+        self.temperature_setpoint_inputbox.setMaximumSize(data_width+50, labels_height+20)
         self.temperature_setpoint_inputbutton = QPushButton("set")
         self.temperature_setpoint_inputbutton.setMinimumSize(50, 0)
         self.temperature_setpoint_inputbutton.setMaximumSize(50+50, 40)

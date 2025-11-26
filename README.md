@@ -12,6 +12,7 @@
 `:S0` = stop data stream  
 `:A` = stop everything (`duty_cycle=0` & stop data stream)  
 `:Xxxxx` = send temperature setpoint (ex: `:X0305`=30,5°C)  
+`:C1` = confirm temperature setpoint to follow
 
 ## UART data formatting
 `\n` = EOL -> to detect when 1 line of data ends  
