@@ -18,11 +18,15 @@ class MainModel(Subject, Observer):
         self._timer = Timer(1/self._refreshing_frequency)
         self._timer.attach(self)
 
-        self._temperature = None
-        self._current = None
-        self._duty_cycle = None
-        self._power = None
+        # self._temperature = None
+        # self._current = None
+        # self._duty_cycle = None
+        # self._power = None
         self._temperature_setpoint = None
+        self._data = {"temperature": [],
+                      "current": [],
+                      "duty_cycle": [],
+                      "power": []}
 
         self._uart = UARTmanager()
 
@@ -93,10 +97,16 @@ class MainModel(Subject, Observer):
         self._temperature_setpoint = self._uart.get_temperature_setpoint()
         self.notify()
     def set_data(self, current, temperature, duty_cycle, power):
-        self._current = current
-        self._temperature = temperature
-        self._duty_cycle = duty_cycle
-        self._power = power
+        data=[temperature, current, duty_cycle, power]
+        keys=["temperature", "current", "duty_cycle", "power"]
+        for value,key in zip(data,keys):
+            self._data[key].append(value)
+            if len(self._data[key])>=100:
+                self._data[key]=self._data[key][-100:]
+        # self._current = current
+        # self._temperature = temperature
+        # self._duty_cycle = duty_cycle
+        # self._power = power
         self.notify()
     def set_duty_cycle(self, duty_cycle: float):
         self._uart.set_duty_cycle(duty_cycle)
@@ -112,13 +122,21 @@ class MainModel(Subject, Observer):
     def get_is_connected(self):
         return self._is_connected
     def get_temperature(self):
-        return self._temperature
+        return self._data["temperature"][-1]
+    def get_temperature_list(self):
+        return self._data["temperature"]
     def get_current(self):
-        return self._current
+        return self._data["current"][-1]
+    def get_current_list(self):
+        return self._data["current"]
     def get_duty_cycle(self):
-        return self._duty_cycle
+        return self._data["duty_cycle"][-1]
+    def get_duty_cycle_list(self):
+        return self._data["duty_cycle"]
     def get_power(self):
-        return self._power
+        return self._data["power"][-1]
+    def get_power_list(self):
+        return self._data["power"]
     def get_temperature_setpoint(self):
         return self._temperature_setpoint
 
@@ -135,7 +153,7 @@ class MainModel(Subject, Observer):
             if DEBUG:
                 print(f"{type(self).__name__}.fetch_measures() - {data}")
                 print(f"{type(self).__name__}.fetch_measures() - {current}, {temperature}, {duty_cycle}, {power}")
-            self.set_data(current, temperature, duty_cycle, power)
+            self.set_data(current=current, temperature=temperature, duty_cycle=duty_cycle, power=power)
     
     def update(self, subject):
         if DEBUG:

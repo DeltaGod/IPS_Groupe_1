@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QFont
 from PyQt5.QtCore import QSize, Qt
+import pyqtgraph as pg # for graphs
 
 from observer import Observer
 
@@ -166,6 +167,14 @@ class MainView(Observer, QWidget):
         self.ctrls.setObjectName("ctrls")
         self.ctrls.setStyleSheet("#ctrls { border: 1px solid black; }")
         self.ctrls_section_title.setStyleSheet("border: 1px solid black;")
+        
+        ## ---------------
+        ## GRAPHS WIDGET
+        ## ---------------
+        self.temperature_graph = pg.PlotWidget()
+        self.current_graph = pg.PlotWidget()
+        self.duty_cycle_graph = pg.PlotWidget()
+        self.power_graph = pg.PlotWidget()
 
         ## ---------------
         ## OVERALL LAYOUT
@@ -176,10 +185,18 @@ class MainView(Observer, QWidget):
         self.setLayout(self.mainlayout)
     
     def update(self, subject):
-        self.set_temperature_data(subject.get_temperature())
-        self.set_current_data(subject.get_current())
-        self.set_duty_cycle_data(subject.get_duty_cycle())
-        self.set_power_data(subject.get_power())
+        # self.set_temperature_data(subject.get_temperature())
+        # self.set_current_data(subject.get_current())
+        # self.set_duty_cycle_data(subject.get_duty_cycle())
+        # self.set_power_data(subject.get_power())
+        self.set_data(subject.get_temperature(),
+                      subject.get_current(),
+                      subject.get_duty_cycle(),
+                      subject.get_power())
+        self.update_graphs(subject.get_temperature_list(),
+                           subject.get_current_list(),
+                           subject.get_duty_cycle_list(),
+                           subject.get_power_list())
         self.set_temperature_setpoint(subject.get_temperature_setpoint())
         self.set_buttons_state(subject.get_is_running())
     
@@ -209,38 +226,35 @@ class MainView(Observer, QWidget):
         else: 
             text = "--"
         self.temperature_setpoint_display.setText(text)
-    
     def set_temperature_data(self, temperature: int|None):
         if temperature is not None:
             text = str(f"{temperature} °C")
         else: 
             text = "--"
         self.temperature_data.setText(text)
-        pass
-
     def set_current_data(self, current: int|None):
         if current is not None:
             text = str(f"{current} °A")
         else: 
             text = "--"
         self.current_data.setText(text)
-        pass
-
     def set_duty_cycle_data(self, duty_cycle: int|None):
         if duty_cycle is not None:
             text = str(f"{duty_cycle} %")
         else: 
             text = "--"
         self.duty_cycle_data.setText(text)
-        pass
-
     def set_power_data(self, power: int|None):
         if power is not None:
             text = str(f"{power} W")
         else: 
             text = "--"
         self.power_data.setText(text)
-        pass
+    def set_data(self, temperature, current, duty_cycle, power):
+        self.set_temperature_data(temperature=temperature)
+        self.set_current_data(current=current)
+        self.set_duty_cycle_data(duty_cycle=duty_cycle)
+        self.set_power_data(power=power)
 
     def get_typed_temperature_setpoint(self):
         text = self.temperature_setpoint_inputbox.text()
@@ -256,6 +270,13 @@ class MainView(Observer, QWidget):
     
     def clear_temperature_setpoint_inputbox(self):
         self.temperature_setpoint_inputbox.setText("")
+    
+    def update_graphs(self, temperature_list, current_list, duty_cycle_list, power_list):
+        time = range(0,100)
+        self.temperature_graph.plot(time, temperature_list)
+        self.current_graph.plot(time, current_list)
+        self.duty_cycle_graph.plot(time, duty_cycle_list)
+        self.power_graph.plot(time, power_list)
         
 
 ## ======================
