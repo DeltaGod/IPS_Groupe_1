@@ -3,8 +3,8 @@
 ## How to use ?
 1. Plug the card.  
 2. You may need to change the port at the bottom of `main.py`, depending on which one the card is connected to.  
-3.  Launch `main.py`.
-4. If you have issues, you can send me a message.
+3. Launch `main.py`.  
+4. If you have issues, you can send me a message.  
 
 ## UART Communication commands:
 `:Dxxx` = change duty cycle  
