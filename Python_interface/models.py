@@ -5,6 +5,7 @@ DEBUG = True
 from uart_manager import UARTmanager
 from observer import Subject, Observer
 from local_timer import Timer
+import numpy as np
 
 class MainModel(Subject, Observer):
     def __init__(self, *args, **kwargs):
@@ -23,10 +24,10 @@ class MainModel(Subject, Observer):
         # self._duty_cycle = None
         # self._power = None
         self._temperature_setpoint = None
-        self._data = {"temperature": [],
-                      "current": [],
-                      "duty_cycle": [],
-                      "power": []}
+        self._data = {"temperature": [np.nan for i in range(100)],
+                      "current": [np.nan for i in range(100)],
+                      "duty_cycle": [np.nan for i in range(100)],
+                      "power": [np.nan for i in range(100)]}
 
         self._uart = UARTmanager()
 
@@ -100,8 +101,8 @@ class MainModel(Subject, Observer):
         data=[temperature, current, duty_cycle, power]
         keys=["temperature", "current", "duty_cycle", "power"]
         for value,key in zip(data,keys):
-            self._data[key].append(value)
-            if len(self._data[key])>=100:
+            self._data[key].append(float(value))
+            if len(self._data[key])>100:
                 self._data[key]=self._data[key][-100:]
         # self._current = current
         # self._temperature = temperature
@@ -122,21 +123,31 @@ class MainModel(Subject, Observer):
     def get_is_connected(self):
         return self._is_connected
     def get_temperature(self):
-        return self._data["temperature"][-1]
+        if len(self._data["temperature"])>0:
+            return self._data["temperature"][-1]
+        return None
     def get_temperature_list(self):
-        return self._data["temperature"]
+        if DEBUG:
+            print(f"{type(self).__name__}.get_temperature_list() --> {list(self._data["temperature"])}")
+        return list(self._data["temperature"])
     def get_current(self):
-        return self._data["current"][-1]
+        if len(self._data["current"])>0:
+            return self._data["current"][-1]
+        return None
     def get_current_list(self):
-        return self._data["current"]
+        return list(self._data["current"])
     def get_duty_cycle(self):
-        return self._data["duty_cycle"][-1]
+        if len(self._data["duty_cycle"])>0:
+            return self._data["duty_cycle"][-1]
+        return None
     def get_duty_cycle_list(self):
-        return self._data["duty_cycle"]
+        return list(self._data["duty_cycle"])
     def get_power(self):
-        return self._data["power"][-1]
+        if len(self._data["power"])>0:
+            return self._data["power"][-1]
+        return None
     def get_power_list(self):
-        return self._data["power"]
+        return list(self._data["power"])
     def get_temperature_setpoint(self):
         return self._temperature_setpoint
 

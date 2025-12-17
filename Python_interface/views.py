@@ -4,6 +4,7 @@ DEBUG=False
 
 
 import sys
+import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QAction, QFileSystemModel, QMainWindow, 
     QPushButton, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, 
@@ -172,9 +173,20 @@ class MainView(Observer, QWidget):
         ## GRAPHS WIDGET
         ## ---------------
         self.temperature_graph = pg.PlotWidget()
+        self.temperature_graph.setTitle("Temperature")
         self.current_graph = pg.PlotWidget()
+        self.current_graph.setTitle("Current")
         self.duty_cycle_graph = pg.PlotWidget()
+        self.duty_cycle_graph.setTitle("Duty Cycle")
         self.power_graph = pg.PlotWidget()
+        self.power_graph.setTitle("Power")
+        self.graphs_layout = QVBoxLayout()
+        self.graphs_layout.addWidget(self.temperature_graph)
+        self.graphs_layout.addWidget(self.current_graph)
+        self.graphs_layout.addWidget(self.duty_cycle_graph)
+        self.graphs_layout.addWidget(self.power_graph)
+        self.graphs = QWidget()
+        self.graphs.setLayout(self.graphs_layout)
 
         ## ---------------
         ## OVERALL LAYOUT
@@ -182,6 +194,7 @@ class MainView(Observer, QWidget):
         self.mainlayout = QGridLayout()
         self.mainlayout.addWidget(self.data_widget, 0, 0, 1, 1)
         self.mainlayout.addWidget(self.ctrls, 0, 1, 1, 1)
+        self.mainlayout.addWidget(self.graphs, 1, 0, 1, 2)
         self.setLayout(self.mainlayout)
     
     def update(self, subject):
@@ -220,32 +233,32 @@ class MainView(Observer, QWidget):
     def cleanup(self):
         pass
 
-    def set_temperature_setpoint(self, temperature: int | None):
-        if temperature is not None:
+    def set_temperature_setpoint(self, temperature: int):
+        if temperature is not np.nan and temperature is not None:
             text = str(f"{temperature} °C")
         else: 
             text = "--"
         self.temperature_setpoint_display.setText(text)
-    def set_temperature_data(self, temperature: int|None):
-        if temperature is not None:
+    def set_temperature_data(self, temperature: int):
+        if temperature is not np.nan:
             text = str(f"{temperature} °C")
         else: 
             text = "--"
         self.temperature_data.setText(text)
-    def set_current_data(self, current: int|None):
-        if current is not None:
+    def set_current_data(self, current: int):
+        if current is not np.nan:
             text = str(f"{current} °A")
         else: 
             text = "--"
         self.current_data.setText(text)
-    def set_duty_cycle_data(self, duty_cycle: int|None):
-        if duty_cycle is not None:
+    def set_duty_cycle_data(self, duty_cycle: int):
+        if duty_cycle is not np.nan:
             text = str(f"{duty_cycle} %")
         else: 
             text = "--"
         self.duty_cycle_data.setText(text)
-    def set_power_data(self, power: int|None):
-        if power is not None:
+    def set_power_data(self, power: int):
+        if power is not np.nan:
             text = str(f"{power} W")
         else: 
             text = "--"

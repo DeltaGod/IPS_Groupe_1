@@ -1,6 +1,6 @@
 # controllers.py
 # coding: utf-8
-DEBUG=True
+DEBUG=False
 
 class MainController:
     def __init__(self, view, model):
